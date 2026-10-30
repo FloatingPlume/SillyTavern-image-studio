@@ -54,9 +54,9 @@ export const CLOUD_IMAGE_TYPES = [
     {
         id: 'xai',
         label: 'xAI Grok Image',
-        hint: 'api.x.ai，OpenAI 风格图片接口',
+        hint: 'api.x.ai；Grok 不支持 size，画坊会传 aspect_ratio / resolution（Imagine）',
         defaultBase: 'https://api.x.ai/v1',
-        defaultModel: 'grok-2-image',
+        defaultModel: 'grok-imagine-image',
         secretKey: 'api_key_xai',
     },
     {

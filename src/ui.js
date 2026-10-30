@@ -475,7 +475,8 @@ function renderCloudProfiles() {
     if (profile) {
         const cached = getBalanceCache(profile.id);
         const balanceText = cached?.ok ? ` · 余额 ${formatBalance(cached)}` : '';
-        setText('is-cloud-hint', `${typeLabel('image', profile.type)} · ${profileHost(profile)} · ${profile.model || '未设默认模型'}${balanceText}`);
+        const xaiHint = profile.type === 'xai' ? ' · Grok 尺寸按宽高比/分辨率，不发送 size' : '';
+        setText('is-cloud-hint', `${typeLabel('image', profile.type)} · ${profileHost(profile)} · ${profile.model || '未设默认模型'}${balanceText}${xaiHint}`);
         const imageModels = filterModels(profile.models || [], { category: 'image' }).map(item => item.id);
         const fallbackModels = (profile.models || []).filter(Boolean);
         const choices = imageModels.length ? imageModels : fallbackModels;

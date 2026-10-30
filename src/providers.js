@@ -105,15 +105,34 @@ function collectOpenAIItems(payload) {
     return [];
 }
 
-async function generateOpenAI(profile, params) {
+export function buildOpenAIImageBody(profile, params) {
     const extra = parseExtraBody(profile.extraBody);
+    const model = String(params.model || profile.model || '');
+    const count = Math.max(1, Number(params.count || 1));
+    const width = Number(params.width || 1024);
+    const height = Number(params.height || 1024);
+
+    if (profile.type === 'xai') {
+        const body = {
+            model,
+            prompt: params.positive,
+            n: Math.min(count, /grok-imagine/i.test(model) ? 4 : 10),
+            response_format: 'url',
+        };
+        if (/grok-imagine/i.test(model)) {
+            body.aspect_ratio = sizeToAspect(width, height);
+            body.resolution = Math.max(width, height) >= 1536 ? '2K' : '1K';
+        }
+        return { ...body, ...extra };
+    }
+
     const body = {
-        model: params.model || profile.model,
+        model,
         prompt: params.positive,
-        n: Number(params.count || 1),
-        size: `${params.width}x${params.height}`,
+        n: count,
+        size: `${width}x${height}`,
     };
-    if (!/^gpt-image/i.test(String(body.model))) {
+    if (!/^gpt-image/i.test(model)) {
         body.response_format = 'b64_json';
     }
     if (profile.type === 'openai-compatible' && params.negative) {
@@ -123,7 +142,11 @@ async function generateOpenAI(profile, params) {
         body.seed = Number(params.seed);
     }
     Object.assign(body, extra);
+    return body;
+}
 
+async function generateOpenAI(profile, params) {
+    const body = buildOpenAIImageBody(profile, params);
     const headers = {
         ...makeAuthHeaders(profile.apiKey),
         ...parseHeaders(profile.headers),

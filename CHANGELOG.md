@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-10-30
+
+- 修复 xAI Grok 生图因 `size` 参数被拒绝的问题：xAI 单独构造请求体，不再发送 OpenAI 风格 `size`。
+- `grok-imagine-*` 使用 `aspect_ratio` + `resolution`（1K/2K）；旧版 `grok-2-image` 只发 prompt/model/n/response_format。
+- xAI 默认模型更新为 `grok-imagine-image`，并在界面提示尺寸适配方式。
+
 ## 0.2.1 — 2026-10-30
 
 - AI 改写支持系统提示词来源：酒馆当前预设（含角色上下文与常规输出处理）、画坊内置、自定义文本框。
