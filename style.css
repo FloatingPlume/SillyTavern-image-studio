@@ -7,6 +7,10 @@
     --is-soft: color-mix(in srgb, var(--is-fg) 8%, transparent);
     --is-danger: #e06c75;
     --is-ok: #79b88a;
+    -moz-text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    writing-mode: horizontal-tb;
     position: fixed;
     top: 0;
     right: 0;
@@ -29,6 +33,24 @@
     overflow: hidden;
 }
 
+#is-panel button,
+#is-panel .is-link,
+#is-panel .is-badge,
+#is-confirm button,
+#is-confirm .is-link,
+.is-cat-window button,
+.is-cat-window .is-link,
+.is-lightbox button {
+    white-space: nowrap;
+}
+
+#is-panel .is-link,
+#is-panel .menu_button,
+#is-confirm .is-link,
+.is-cat-window .is-link {
+    flex-shrink: 0;
+}
+
 #is-panel.is-open {
     transform: translateX(0);
 }
@@ -47,8 +69,9 @@
 .is-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px 8px;
     padding: 10px 12px 8px;
     border-bottom: 1px solid var(--is-border);
     flex: 0 0 auto;
@@ -229,6 +252,7 @@
     cursor: pointer;
     font-size: 12px;
     min-height: 36px;
+    white-space: nowrap;
 }
 
 .is-seg button.active {
@@ -284,10 +308,16 @@
 .is-field-head {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     justify-content: space-between;
-    gap: 8px;
+    gap: 4px 8px;
     color: var(--is-muted);
     font-size: 11px;
+}
+
+.is-field-head > label {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .is-inline-actions {
@@ -469,6 +499,7 @@ details > summary {
 
 .is-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     position: sticky;
     bottom: -18px;
@@ -505,8 +536,9 @@ details > summary {
 .is-meter-head {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     justify-content: space-between;
-    gap: 8px;
+    gap: 2px 8px;
     font-size: 11px;
 }
 
@@ -779,7 +811,8 @@ details > summary {
 .is-api-card-head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 3px 6px;
 }
 
 .is-api-name {
@@ -834,15 +867,41 @@ details > summary {
 .is-connection-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
     padding: 5px 6px;
     background: var(--is-soft);
     border-radius: 6px;
     font-size: 10.5px;
 }
 
-.is-connection-item .is-grow {
+.is-connection-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 140px;
+    min-width: 0;
+}
+
+.is-connection-main .is-api-name {
+    flex: 0 1 auto;
+}
+
+.is-connection-model {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--is-muted);
+}
+
+.is-connection-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    margin-left: auto;
 }
 
 .is-editor {
@@ -1043,6 +1102,17 @@ details > summary {
     }
 }
 
+@media (max-width: 380px) {
+    .is-body {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .is-grid-3 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 @media (min-width: 1200px) {
     #is-panel {
         width: 460px;
@@ -1056,6 +1126,7 @@ details > summary {
 }
 
 .is-chip {
+    flex: 0 0 auto;
     border: 1px solid var(--is-border);
     background: transparent;
     color: var(--is-muted);
@@ -1064,6 +1135,7 @@ details > summary {
     font-size: 10px;
     cursor: pointer;
     line-height: 1.6;
+    white-space: nowrap;
 }
 
 .is-chip.active {
@@ -1145,7 +1217,8 @@ details > summary {
 .is-scan-result {
     display: flex;
     align-items: center;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 4px 6px;
     padding: 5px 7px;
     border: 1px solid color-mix(in srgb, var(--is-ok) 40%, var(--is-border));
     border-radius: 6px;
@@ -1282,7 +1355,8 @@ details > summary {
 
 .is-library-actions {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 4px 10px;
 }
 
 .is-library-candidates {
@@ -1333,6 +1407,7 @@ details > summary {
     position: fixed;
     inset: 0;
     z-index: 49000;
+    writing-mode: horizontal-tb;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1487,6 +1562,7 @@ details > summary {
     right: 14px;
     bottom: 150px;
     z-index: 45500;
+    writing-mode: horizontal-tb;
     width: min(320px, calc(100vw - 20px));
     max-height: 62vh;
     display: flex;

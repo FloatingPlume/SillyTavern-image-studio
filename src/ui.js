@@ -705,11 +705,15 @@ function renderConnectionProfiles() {
     node.innerHTML = profiles.map(profile => {
         const selected = route.mode === 'connection' && route.connectionProfileId === profile.id;
         return `<div class="is-connection-item">
-        <span class="is-api-name">${escapeHtml(profile.name)}</span>
-        ${selected ? '<span class="is-badge">插件模型</span>' : ''}
-        <span class="is-grow">${escapeHtml(profile.model || '')}</span>
-        <button type="button" class="is-link" data-connection-action="switch" data-name="${escapeHtml(profile.name)}">切换</button>
-        <button type="button" class="is-link" data-connection-action="plugin" data-id="${escapeHtml(profile.id)}">${selected ? '当前插件模型' : '设为插件模型'}</button>
+        <div class="is-connection-main">
+            <span class="is-api-name">${escapeHtml(profile.name)}</span>
+            ${selected ? '<span class="is-badge">插件模型</span>' : ''}
+            <span class="is-connection-model">${escapeHtml(profile.model || '')}</span>
+        </div>
+        <div class="is-connection-actions">
+            <button type="button" class="is-link" data-connection-action="switch" data-name="${escapeHtml(profile.name)}">切换</button>
+            <button type="button" class="is-link" data-connection-action="plugin" data-id="${escapeHtml(profile.id)}">${selected ? '当前插件模型' : '设为插件模型'}</button>
+        </div>
     </div>`;
     }).join('');
 }
