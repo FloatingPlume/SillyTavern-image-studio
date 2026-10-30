@@ -37,6 +37,17 @@ import {
 } from './util.js';
 import { ComfyService } from './comfy.js';
 import {
+    composeFinalPrompt,
+    defaultPresentCharacters,
+    getCharacterLibrary,
+    matchCharacterNames,
+    matchPresentCharacters,
+    mergeLibraryEntries,
+    normalizeLibraryEntry,
+    saveCharacterLibrary,
+    scanCharacterCandidates,
+} from './character-library.js';
+import {
     MODEL_CATEGORIES,
     canAutoFetchModels,
     categoryCounts,
@@ -53,6 +64,7 @@ import {
     scanComfy,
 } from './discovery.js';
 import { defaultImageProfile } from './providers.js';
+import { initFloatingCat, renderCat } from './floating-cat.js';
 import { queryBalance, formatBalance, balanceDetails } from './balance.js';
 import {
     applyChatProfile,
@@ -106,6 +118,10 @@ const ui = {
     chatEventsBound: false,
     disableMessageRestore: false,
     messageGenBusy: false,
+    libraryCandidates: [],
+    libraryEditingId: null,
+    libraryReferencePath: '',
+    sceneConfirm: null,
 };
 
 let monitorComfy = new ComfyService();
@@ -176,6 +192,12 @@ export function initUI() {
     renderCurrentChat();
     renderRewriteSelects();
     bindChatMessageEvents();
+    initFloatingCat({
+        openPanel: () => openPanel('generate'),
+        openHistory: () => openPanel('history'),
+        cancel: () => cancelJob(),
+        openLightbox: item => openLightbox(item, 'history'),
+    });
     ui.initialized = true;
     window.ImageStudio = {
         open: openPanel,
@@ -289,6 +311,7 @@ function switchTab(tab) {
         renderCurrentChat();
     }
     if (target === 'history') renderHistory();
+    if (target === 'library') renderLibrary();
     el('is-panel')?.querySelector('.is-body')?.scrollTo({ top: 0 });
 }
 
@@ -662,6 +685,7 @@ function renderHistory() {
     updateAutosave();
     if (!settings.history.length) {
         node.innerHTML = '<div class="is-hint">还没有生成记录。图片默认会保存到酒馆图库的 image-studio 文件夹。</div>';
+        renderCat();
         return;
     }
     node.innerHTML = settings.history.map(entry => {
@@ -686,6 +710,7 @@ function renderHistory() {
             </div>
         </div>`;
     }).join('');
+    renderCat();
 }
 
 function renderJob() {
@@ -729,6 +754,7 @@ function renderJob() {
     renderRequestDetails();
     if (!active) stopJobTimer();
     updateSettingsStatus();
+    renderCat();
 }
 
 function renderResults() {
@@ -736,6 +762,7 @@ function renderResults() {
     if (!node) return;
     if (!job.results.length) {
         node.innerHTML = '';
+        renderCat();
         return;
     }
     node.innerHTML = job.results.map((result, index) => {
@@ -757,6 +784,7 @@ function renderResults() {
         }
     }
     if (job.results.some(result => result.blob && !result.path)) renderResultsAgain();
+    renderCat();
 }
 
 function renderResultsAgain() {
@@ -1475,7 +1503,7 @@ function reuseEntry(entry) {
     toast('success', '参数已复用');
 }
 
-async function requestRewrite({ style, intent, positive, negative, targetMessage = '' }) {
+async function requestRewrite({ style, intent, positive, negative, targetMessage = '', libraryEntries = [] }) {
     const settings = get();
     const chat = ctx()?.chat || [];
     const lastAssistant = [...chat].reverse().find(message => message && !message.is_user && !message.is_system);
@@ -1483,13 +1511,13 @@ async function requestRewrite({ style, intent, positive, negative, targetMessage
     const systemSource = valueOf('is-rewrite-system-source') || settings.prompt.rewriteSystemSource || 'st';
     const source = systemSource === 'st' ? 'current' : (valueOf('is-rewrite-source') || settings.prompt.rewriteMode || 'current');
     if (systemSource === 'st') {
-        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage: target });
+        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage: target, libraryEntries });
         return await rewriteWithCurrentPreset(quietPrompt, 800);
     }
     const systemOverride = systemSource === 'custom'
         ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
         : settings.prompt.rewriteSystem;
-    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage: target, systemOverride });
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage: target, libraryEntries, systemOverride });
     if (source === 'current') {
         return await rewriteWithCurrentApi(messages, 700);
     }
@@ -1526,7 +1554,7 @@ async function runRewrite() {
     const button = el('is-rewrite-run');
     if (button) button.disabled = true;
     try {
-        const raw = await requestRewrite({ style, intent, positive, negative });
+        const raw = await requestRewrite({ style, intent, positive, negative, libraryEntries: getCharacterLibrary() });
         const parsed = parseRewriteResult(raw, negative);
         if (!parsed.positive) throw new Error('模型没有给出可用的提示词');
         setValue('is-positive', parsed.positive);
@@ -1644,18 +1672,213 @@ async function useScanResult(url) {
     await testComfyWithModels();
 }
 
+function libraryRoleLabel(role) {
+    return role === 'user' ? '用户角色' : role === 'npc' ? 'NPC' : '角色';
+}
+
+function renderLibrary() {
+    const context = ctx();
+    const character = context?.characters?.[context?.characterId];
+    setText('is-library-char', character ? `当前：${character.name || '未命名'}` : '当前没有打开角色卡');
+    const entries = getCharacterLibrary();
+    const list = el('is-library-list');
+    if (!list) return;
+    if (!entries.length) {
+        list.innerHTML = '<div class="is-hint">角色库还是空的。点“扫描角色卡 / 世界书”找候选，或手动添加。</div>';
+        return;
+    }
+    list.innerHTML = entries.map(entry => {
+        const thumb = entry.referencePath ? imageUrl(entry.referencePath) : '';
+        return `<div class="is-library-item" data-library-id="${escapeHtml(entry.id)}">
+            ${thumb
+                ? `<img class="is-library-thumb" src="${escapeHtml(thumb)}" alt="${escapeHtml(entry.name)}" loading="lazy" />`
+                : '<div class="is-library-thumb is-library-thumb-empty"><i class="fa-solid fa-user"></i></div>'}
+            <div class="is-library-info">
+                <strong>${escapeHtml(entry.name)} <span class="is-badge">${escapeHtml(libraryRoleLabel(entry.role))}</span></strong>
+                <div class="is-hint">${escapeHtml(entry.aliases?.length ? `别名：${entry.aliases.join('、')}` : '无别名')}</div>
+                <div class="is-library-desc">${escapeHtml(truncate(entry.appearance || '未填写外貌', 110))}</div>
+                <div class="is-library-actions">
+                    <button type="button" class="is-link" data-library-action="edit" data-id="${escapeHtml(entry.id)}">编辑</button>
+                    <button type="button" class="is-link" data-library-action="delete" data-id="${escapeHtml(entry.id)}">删除</button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderLibraryCandidates() {
+    const wrap = el('is-library-candidates-wrap');
+    const list = el('is-library-candidates');
+    if (!wrap || !list) return;
+    const candidates = ui.libraryCandidates || [];
+    wrap.hidden = !candidates.length;
+    if (!candidates.length) {
+        list.innerHTML = '';
+        return;
+    }
+    const existingNames = new Set((getCharacterLibrary() || []).map(entry => entry.name.toLowerCase()));
+    list.innerHTML = candidates.map(candidate => {
+        const existing = existingNames.has(candidate.name.toLowerCase());
+        const checked = !existing && (candidate.source === 'character-card' || candidate.source === 'persona');
+        return `<label class="is-library-candidate">
+            <input type="checkbox" data-library-candidate="${escapeHtml(candidate.id)}" ${checked ? 'checked' : ''} />
+            <span class="is-library-candidate-body">
+                <strong>${escapeHtml(candidate.name)}</strong>
+                <span class="is-badge">${escapeHtml(candidate.source === 'persona' ? '用户设定' : candidate.source === 'character-card' ? '角色卡' : '世界书')}</span>
+                ${existing ? '<span class="is-badge">已在库</span>' : ''}
+                <span class="is-hint">${escapeHtml(truncate(candidate.appearance, 160))}</span>
+            </span>
+        </label>`;
+    }).join('');
+}
+
+async function scanLibrary() {
+    setText('is-library-status', '正在扫描当前角色卡、世界书和用户设定…');
+    try {
+        ui.libraryCandidates = await scanCharacterCandidates();
+        renderLibraryCandidates();
+        setText('is-library-status', ui.libraryCandidates.length
+            ? `找到 ${ui.libraryCandidates.length} 个候选；勾选后加入角色库。`
+            : '没有找到带外貌信息的候选。可以手动添加。');
+    } catch (error) {
+        setText('is-library-status', `扫描失败：${error.message || error}`);
+    }
+}
+
+async function addSelectedLibraryCandidates() {
+    const ids = [...document.querySelectorAll('[data-library-candidate]:checked')]
+        .map(input => input.dataset.libraryCandidate);
+    if (!ids.length) {
+        toast('warning', '先勾选要加入的角色');
+        return;
+    }
+    const selected = ui.libraryCandidates.filter(candidate => ids.includes(candidate.id));
+    try {
+        const entries = mergeLibraryEntries(getCharacterLibrary(), selected);
+        await saveCharacterLibrary(entries);
+        ui.libraryCandidates = [];
+        renderLibraryCandidates();
+        renderLibrary();
+        setText('is-library-status', `已加入 ${selected.length} 个角色`);
+        toast('success', '角色库已更新');
+    } catch (error) {
+        setText('is-library-status', `保存失败：${error.message || error}`);
+        toast('error', error.message || String(error));
+    }
+}
+
+function clearLibraryReferencePreview() {
+    const image = el('is-library-reference-preview');
+    const clear = el('is-library-reference-clear');
+    if (image) {
+        image.hidden = true;
+        image.removeAttribute('src');
+    }
+    if (clear) clear.hidden = true;
+}
+
+function updateLibraryReferencePreview() {
+    const image = el('is-library-reference-preview');
+    const clear = el('is-library-reference-clear');
+    if (!image) return;
+    if (ui.libraryReferencePath) {
+        image.src = imageUrl(ui.libraryReferencePath);
+        image.hidden = false;
+        if (clear) clear.hidden = false;
+    } else {
+        clearLibraryReferencePreview();
+    }
+}
+
+function openLibraryEditor(entry = null) {
+    ui.libraryEditingId = entry?.id || null;
+    ui.libraryReferencePath = entry?.referencePath || '';
+    setText('is-library-editor-title', entry ? `编辑角色：${entry.name}` : '添加角色');
+    setValue('is-library-name', entry?.name || '');
+    setValue('is-library-aliases', entry?.aliases?.join(', ') || '');
+    setValue('is-library-role', entry?.role || 'character');
+    setValue('is-library-appearance', entry?.appearance || '');
+    setValue('is-library-outfit', entry?.outfit || '');
+    setValue('is-library-notes', entry?.notes || '');
+    updateLibraryReferencePreview();
+    const editor = el('is-library-editor');
+    if (editor) {
+        editor.hidden = false;
+        setTimeout(() => editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+        el('is-library-name')?.focus();
+    }
+}
+
+function closeLibraryEditor() {
+    ui.libraryEditingId = null;
+    ui.libraryReferencePath = '';
+    setHidden('is-library-editor', true);
+    clearLibraryReferencePreview();
+}
+
+async function saveLibraryEditor() {
+    const name = String(valueOf('is-library-name') || '').trim();
+    if (!name) {
+        toast('warning', '角色名不能为空');
+        return;
+    }
+    try {
+        let entries = getCharacterLibrary();
+        const entry = normalizeLibraryEntry({
+            id: ui.libraryEditingId || undefined,
+            name,
+            aliases: String(valueOf('is-library-aliases') || '').split(/[,，]/).map(alias => alias.trim()).filter(Boolean),
+            role: valueOf('is-library-role') || 'character',
+            appearance: valueOf('is-library-appearance'),
+            outfit: valueOf('is-library-outfit'),
+            notes: valueOf('is-library-notes'),
+            referencePath: ui.libraryReferencePath,
+            referenceName: '',
+            source: 'manual',
+        });
+        const index = entries.findIndex(item => item.id === ui.libraryEditingId);
+        if (index >= 0) entries[index] = { ...entry, id: entries[index].id };
+        else entries.push(entry);
+        await saveCharacterLibrary(entries);
+        closeLibraryEditor();
+        renderLibrary();
+        setText('is-library-status', '角色库已保存到当前角色卡');
+        toast('success', '角色已保存');
+    } catch (error) {
+        toast('error', error.message || String(error));
+    }
+}
+
+async function deleteLibraryEntry(id) {
+    const entry = getCharacterLibrary().find(item => item.id === id);
+    if (!entry) return;
+    if (!(await confirmAction(`删除角色「${escapeHtml(entry.name)}」？`))) return;
+    try {
+        const entries = getCharacterLibrary().filter(item => item.id !== id);
+        await saveCharacterLibrary(entries);
+        renderLibrary();
+        toast('success', '已删除');
+    } catch (error) {
+        toast('error', error.message || String(error));
+    }
+}
+
+async function setLibraryReferenceFile(file) {
+    if (!file) return;
+    setText('is-library-status', '正在保存参考图…');
+    try {
+        const saved = await saveBlobToST(file, { filename: `character-ref-${Date.now()}` });
+        ui.libraryReferencePath = saved.path;
+        updateLibraryReferencePreview();
+        setText('is-library-status', '参考图已保存，保存角色后生效');
+    } catch (error) {
+        setText('is-library-status', `参考图保存失败：${error.message || error}`);
+    }
+}
+
 function messageChatId() {
     const context = ctx();
     return String(context?.getCurrentChatId?.() || context?.chatId || '');
-}
-
-function lastCharacterMessageId() {
-    const chat = ctx()?.chat || [];
-    for (let index = chat.length - 1; index >= 0; index -= 1) {
-        const message = chat[index];
-        if (message && !message.is_user && !message.is_system) return index;
-    }
-    return -1;
 }
 
 function removeMessageArtifacts() {
@@ -1665,25 +1888,28 @@ function removeMessageArtifacts() {
 
 function refreshMessageGenButton() {
     document.querySelectorAll('.is-gen-image-button').forEach(node => node.remove());
-    const messageId = lastCharacterMessageId();
-    if (messageId < 0) return;
-    const buttons = document.querySelector(`.mes[mesid="${messageId}"] .mes_buttons`);
-    if (!buttons) return;
-    const button = document.createElement('div');
-    button.className = 'mes_button is-gen-image-button fa-solid fa-wand-magic-sparkles';
-    button.title = '画坊：按这条消息生成插画（后台）';
-    button.dataset.mesid = String(messageId);
-    button.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        generateFromMessage(messageId);
-    });
-    const edit = buttons.querySelector('.mes_edit');
-    buttons.insertBefore(button, edit || null);
-    if (job.active
-        && String(job.details?.messageId) === String(messageId)
-        && String(job.details?.chatId || '') === messageChatId()) {
-        button.classList.add('is-busy');
+    const chat = ctx()?.chat || [];
+    for (let messageId = 0; messageId < chat.length; messageId += 1) {
+        const message = chat[messageId];
+        if (!message || message.is_user || message.is_system) continue;
+        const buttons = document.querySelector(`.mes[mesid="${messageId}"] .mes_buttons`);
+        if (!buttons) continue;
+        const button = document.createElement('div');
+        button.className = 'mes_button is-gen-image-button fa-solid fa-wand-magic-sparkles';
+        button.title = '画坊：按这条消息生成插画（后台）';
+        button.dataset.mesid = String(messageId);
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            generateFromMessage(messageId);
+        });
+        const edit = buttons.querySelector('.mes_edit');
+        buttons.insertBefore(button, edit || null);
+        if (job.active
+            && String(job.details?.messageId) === String(messageId)
+            && String(job.details?.chatId || '') === messageChatId()) {
+            button.classList.add('is-busy');
+        }
     }
 }
 
@@ -1786,6 +2012,8 @@ function attachMessageResult(messageId, result) {
         negative: details.negative || result.negative || '',
         model: details.model || details.checkpoint || '',
         seed: details.seed,
+        width: details.width,
+        height: details.height,
         createdAt: Date.now(),
     };
     ui.messageResults.set(Number(messageId), item);
@@ -1796,25 +2024,121 @@ function attachMessageResult(messageId, result) {
     }
 }
 
-async function generateFromMessage(messageId) {
+async function effectiveLibraryEntries() {
+    const existing = getCharacterLibrary();
+    if (existing.length) return existing;
+    try {
+        const candidates = await scanCharacterCandidates();
+        return candidates.filter(candidate => candidate.source === 'character-card' || candidate.source === 'persona');
+    } catch (error) {
+        console.warn('[画坊] 初始化角色库条目失败', error);
+        return [];
+    }
+}
+
+function recentContextText() {
+    const chat = ctx()?.chat || [];
+    return chat.slice(-5)
+        .map(message => `${message.name || (message.is_user ? 'User' : 'Character')}: ${stripHtml(message.mes || '')}`)
+        .join('\n');
+}
+
+function selectedConfirmEntries() {
+    const entries = ui.sceneConfirm?.entries || [];
+    const checked = new Set([...document.querySelectorAll('[data-confirm-char]:checked')]
+        .map(input => input.dataset.confirmChar));
+    return entries.filter(entry => checked.has(entry.id));
+}
+
+function updateConfirmReferences() {
+    const node = el('is-confirm-refs');
+    if (!node) return;
+    const selected = selectedConfirmEntries().filter(entry => entry.referencePath);
+    node.innerHTML = selected.length
+        ? selected.map(entry => `<img class="is-confirm-ref" src="${escapeHtml(imageUrl(entry.referencePath))}" alt="${escapeHtml(entry.name)} 参考图" title="${escapeHtml(entry.name)}" loading="lazy" />`).join('')
+        : '';
+}
+
+function updateConfirmFinal() {
+    if (!ui.sceneConfirm) return;
+    const scene = String(valueOf('is-confirm-scene') || '');
+    const entries = selectedConfirmEntries();
+    const style = ui.sceneConfirm.style || 'tags';
+    setText('is-confirm-final', composeFinalPrompt(scene, entries, style));
+    updateConfirmReferences();
+}
+
+function renderConfirmCharacters() {
+    const node = el('is-confirm-characters');
+    if (!node || !ui.sceneConfirm) return;
+    const entries = ui.sceneConfirm.entries || [];
+    if (!entries.length) {
+        node.innerHTML = '<div class="is-hint">角色库为空。可以先去“角色库”扫描角色卡/世界书，或直接生成纯场景图。</div>';
+        updateConfirmFinal();
+        return;
+    }
+    node.innerHTML = entries.map(entry => {
+        const checked = ui.sceneConfirm.selectedIds.has(entry.id) ? 'checked' : '';
+        const thumb = entry.referencePath ? `<img src="${escapeHtml(imageUrl(entry.referencePath))}" alt="" loading="lazy" />` : '<span class="is-confirm-char-icon fa-solid fa-user"></span>';
+        return `<label class="is-confirm-char">
+            <input type="checkbox" data-confirm-char="${escapeHtml(entry.id)}" ${checked} />
+            ${thumb}
+            <span class="is-grow"><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(libraryRoleLabel(entry.role))} · ${escapeHtml(truncate(entry.appearance || '未填写外貌', 70))}</small></span>
+        </label>`;
+    }).join('');
+    updateConfirmFinal();
+}
+
+/**
+ * @param {{messageId:number, entries:Array, selectedIds:Set<string>, targetText:string, style:string, scene:string, negative:string}} data
+ */
+function openSceneConfirm(data) {
+    ui.sceneConfirm = data;
+    setText('is-confirm-target', `目标消息：${truncate(data.targetText || '（无文本）', 240)}`);
+    setValue('is-confirm-scene', data.scene);
+    setValue('is-confirm-negative', data.negative || '');
+    setText('is-confirm-status', data.entries.length ? '' : '角色库为空；可先去角色库扫描，或直接生成纯场景图。');
+    renderConfirmCharacters();
+    const node = el('is-confirm');
+    if (node) node.hidden = false;
+}
+
+function closeSceneConfirm(clearBusy = true) {
+    const node = el('is-confirm');
+    if (node) node.hidden = true;
+    const messageId = ui.sceneConfirm?.messageId;
+    ui.sceneConfirm = null;
+    if (clearBusy) {
+        ui.messageGenBusy = false;
+        document.querySelectorAll('.is-gen-image-button.is-busy').forEach(button => button.classList.remove('is-busy'));
+        if (messageId != null) {
+            clearMessageSlot(messageId);
+            setTimeout(restoreMessageThumbnails, 50);
+        }
+        refreshMessageGenButton();
+    }
+}
+
+async function openMessageSceneConfirm(messageId) {
     if (job.active || ui.messageGenBusy) {
         toast('warning', '已有画坊生成任务在运行，等它完成再点');
         return;
     }
-    ui.messageGenBusy = true;
     const context = ctx();
     const message = context?.chat?.[messageId];
     if (!message || message.is_user || message.is_system) return;
+    ui.messageGenBusy = true;
     const settings = get();
     const target = stripHtml(message.mes || '');
-    const chatId = messageChatId();
     const button = document.querySelector(`.mes[mesid="${messageId}"] .is-gen-image-button`);
     button?.classList.add('is-busy');
     ui.staleMessages.delete(Number(messageId));
-    setMessageState(messageId, '提取场景…');
+    setMessageState(messageId, '提取场景与角色…');
 
-    let positive = '';
+    const entries = await effectiveLibraryEntries();
+    let scene = '';
     let negative = settings.prompt.negative || '';
+    let aiCharacters = [];
     try {
         const style = settings.prompt.style || 'tags';
         const raw = await requestRewrite({
@@ -1823,21 +2147,48 @@ async function generateFromMessage(messageId) {
             positive: '',
             negative,
             targetMessage: target,
+            libraryEntries: entries,
         });
         const parsed = parseRewriteResult(raw, negative);
-        positive = parsed.positive;
+        scene = parsed.positive;
         negative = parsed.negative || negative;
+        aiCharacters = parsed.characters || [];
     } catch (error) {
         console.warn('[画坊] 场景提取失败，使用消息原文兜底', error);
-        positive = [buildCharacterPrompt(), truncate(target, 1200)].filter(Boolean).join(', ');
+        scene = [buildCharacterPrompt(), truncate(target, 1200)].filter(Boolean).join(', ');
     }
-    positive = expandText(positive);
-    if (!positive) {
-        ui.messageGenBusy = false;
-        button?.classList.remove('is-busy');
+    scene = expandText(scene);
+    if (!scene) {
+        closeSceneConfirm();
         setMessageState(messageId, '没有可用的提示词', true);
         return;
     }
+    const aiMatches = matchCharacterNames(entries, aiCharacters);
+    const textMatches = matchPresentCharacters(entries, `${target}\n${recentContextText()}`);
+    let selected = [...new Map([...aiMatches, ...textMatches].map(entry => [entry.id, entry])).values()];
+    if (!selected.length) selected = defaultPresentCharacters(entries);
+    const selectedIds = new Set(selected.map(entry => entry.id));
+    openSceneConfirm({
+        messageId: Number(messageId),
+        entries,
+        selectedIds,
+        targetText: target,
+        style: settings.prompt.style || 'tags',
+        scene,
+        negative,
+    });
+}
+
+async function startMessageImageGeneration(messageId, positive, negative) {
+    if (!positive) {
+        toast('warning', '场景提示词为空');
+        return;
+    }
+    ui.messageGenBusy = true;
+    const settings = get();
+    const chatId = messageChatId();
+    const button = document.querySelector(`.mes[mesid="${messageId}"] .is-gen-image-button`);
+    button?.classList.add('is-busy');
     settings.draft.positive = positive;
     settings.draft.negative = negative;
     setValue('is-positive', positive);
@@ -1897,6 +2248,25 @@ async function generateFromMessage(messageId) {
     }
 }
 
+async function confirmSceneGeneration() {
+    if (!ui.sceneConfirm) return;
+    const scene = String(valueOf('is-confirm-scene') || '').trim();
+    if (!scene) {
+        setText('is-confirm-status', '场景提示词不能为空');
+        return;
+    }
+    const entries = selectedConfirmEntries();
+    const negative = String(valueOf('is-confirm-negative') || '').trim();
+    const positive = composeFinalPrompt(scene, entries, ui.sceneConfirm.style || 'tags');
+    const messageId = ui.sceneConfirm.messageId;
+    closeSceneConfirm(false);
+    await startMessageImageGeneration(messageId, positive, negative);
+}
+
+async function generateFromMessage(messageId) {
+    await openMessageSceneConfirm(messageId);
+}
+
 function bindChatMessageEvents() {
     if (ui.chatEventsBound) return;
     const context = ctx();
@@ -1917,6 +2287,10 @@ function bindChatMessageEvents() {
                 ui.messageResults.clear();
                 ui.staleMessages.clear();
                 ui.disableMessageRestore = false;
+                closeLibraryEditor();
+                ui.libraryCandidates = [];
+                renderLibraryCandidates();
+                if (ui.tab === 'library') renderLibrary();
                 setTimeout(schedule, 250);
                 return;
             }
@@ -2042,6 +2416,63 @@ function bindEvents() {
         }
         if (target.closest('#is-rewrite-run')) {
             runRewrite();
+            return;
+        }
+        if (target.closest('#is-library-scan')) {
+            scanLibrary();
+            return;
+        }
+        if (target.closest('#is-library-add')) {
+            openLibraryEditor();
+            return;
+        }
+        if (target.closest('#is-library-add-selected')) {
+            addSelectedLibraryCandidates();
+            return;
+        }
+        if (target.closest('#is-library-clear-candidates')) {
+            ui.libraryCandidates = [];
+            renderLibraryCandidates();
+            setText('is-library-status', '');
+            return;
+        }
+        if (target.closest('#is-library-save')) {
+            saveLibraryEditor();
+            return;
+        }
+        if (target.closest('#is-library-cancel')) {
+            closeLibraryEditor();
+            return;
+        }
+        if (target.closest('#is-library-reference-clear')) {
+            ui.libraryReferencePath = '';
+            updateLibraryReferencePreview();
+            return;
+        }
+        const libraryAction = target.closest('[data-library-action]');
+        if (libraryAction) {
+            const id = libraryAction.dataset.id;
+            const entry = getCharacterLibrary().find(item => item.id === id);
+            if (!entry) return;
+            if (libraryAction.dataset.libraryAction === 'edit') openLibraryEditor(entry);
+            else deleteLibraryEntry(id);
+            return;
+        }
+        if (target.closest('#is-confirm-close') || target.closest('#is-confirm-cancel')) {
+            closeSceneConfirm();
+            return;
+        }
+        if (target.closest('#is-confirm-open-library')) {
+            closeSceneConfirm();
+            openPanel('library');
+            return;
+        }
+        if (target.closest('#is-confirm-generate')) {
+            confirmSceneGeneration();
+            return;
+        }
+        if (target.id === 'is-confirm') {
+            closeSceneConfirm();
             return;
         }
         if (target.closest('#is-rewrite-system-reset')) {
@@ -2374,6 +2805,9 @@ function bindEvents() {
                 ui.modelQuery = target.value;
                 renderModelBrowser();
                 break;
+            case 'is-confirm-scene':
+                updateConfirmFinal();
+                break;
             case 'is-profile-name':
             case 'is-profile-base':
             case 'is-profile-key':
@@ -2403,6 +2837,18 @@ function bindEvents() {
 
     document.addEventListener('change', event => {
         const target = event.target;
+        if (target?.id === 'is-library-reference-file') {
+            const file = target.files?.[0];
+            setLibraryReferenceFile(file);
+            return;
+        }
+        if (target?.matches?.('[data-confirm-char]')) {
+            const entry = selectedConfirmEntries().find(item => item.id === target.dataset.confirmChar);
+            if (entry && ui.sceneConfirm) ui.sceneConfirm.selectedIds.add(entry.id);
+            if (!target.checked && ui.sceneConfirm) ui.sceneConfirm.selectedIds.delete(target.dataset.confirmChar);
+            updateConfirmFinal();
+            return;
+        }
         const loraRow = target?.closest?.('[data-lora-index]');
         if (loraRow && target.dataset.loraField) {
             const index = Number(loraRow.dataset.loraIndex);
@@ -2541,6 +2987,10 @@ function bindEvents() {
 
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
+        if (el('is-confirm') && !el('is-confirm').hidden) {
+            closeSceneConfirm();
+            return;
+        }
         if (!el('is-lightbox')?.hidden) {
             closeLightbox();
             return;

@@ -19,6 +19,7 @@ export function panelTemplate() {
   <nav class="is-tabs" role="tablist">
     <button type="button" class="is-tab active" data-is-tab="generate"><i class="fa-solid fa-wand-magic-sparkles"></i><span>生成</span></button>
     <button type="button" class="is-tab" data-is-tab="monitor"><i class="fa-solid fa-desktop"></i><span>PC / 队列</span></button>
+    <button type="button" class="is-tab" data-is-tab="library"><i class="fa-solid fa-address-book"></i><span>角色库</span></button>
     <button type="button" class="is-tab" data-is-tab="api"><i class="fa-solid fa-key"></i><span>API</span></button>
     <button type="button" class="is-tab" data-is-tab="history"><i class="fa-solid fa-clock-rotate-left"></i><span>记录</span></button>
   </nav>
@@ -318,6 +319,57 @@ export function panelTemplate() {
       </div>
     </section>
 
+    <section class="is-pane" data-is-pane="library" hidden>
+      <div class="is-card">
+        <div class="is-card-title"><i class="fa-solid fa-address-book"></i> 角色库 <span id="is-library-char" class="is-hint"></span></div>
+        <div class="is-hint">角色资料保存在当前角色卡的 <code>data.extensions.imageStudio.characterLibrary</code>。生成时会把选中角色的外貌/服装写进提示词；参考图先作为素材预览和存档。</div>
+        <div class="is-inline-actions">
+          <button type="button" class="menu_button" id="is-library-scan"><i class="fa-solid fa-magnifying-glass"></i> 扫描角色卡 / 世界书</button>
+          <button type="button" class="menu_button" id="is-library-add"><i class="fa-solid fa-plus"></i> 添加角色</button>
+        </div>
+        <div id="is-library-status" class="is-hint"></div>
+      </div>
+
+      <div id="is-library-candidates-wrap" class="is-card" hidden>
+        <div class="is-card-title"><i class="fa-solid fa-wand-magic-sparkles"></i> 扫描候选 <span class="is-hint">勾选后加入角色库</span></div>
+        <div id="is-library-candidates" class="is-library-candidates"></div>
+        <div class="is-inline-actions">
+          <button type="button" class="menu_button" id="is-library-add-selected">加入所选</button>
+          <button type="button" class="is-link" id="is-library-clear-candidates">清空候选</button>
+        </div>
+      </div>
+
+      <div id="is-library-list" class="is-library-list"></div>
+
+      <div id="is-library-editor" class="is-card" hidden>
+        <div class="is-card-title" id="is-library-editor-title">添加角色</div>
+        <div class="is-field"><label>名称</label><input id="is-library-name" class="text_pole" type="text" /></div>
+        <div class="is-field"><label>别名（逗号分隔）</label><input id="is-library-aliases" class="text_pole" type="text" /></div>
+        <div class="is-field"><label>类型</label>
+          <select id="is-library-role" class="text_pole">
+            <option value="character">角色</option>
+            <option value="user">用户角色</option>
+            <option value="npc">NPC</option>
+          </select>
+        </div>
+        <div class="is-field"><label>外貌 / 体貌</label><textarea id="is-library-appearance" class="text_pole is-textarea" rows="4"></textarea></div>
+        <div class="is-field"><label>服装 / 配饰</label><textarea id="is-library-outfit" class="text_pole is-textarea" rows="2"></textarea></div>
+        <div class="is-field"><label>备注</label><textarea id="is-library-notes" class="text_pole is-textarea" rows="2"></textarea></div>
+        <div class="is-field">
+          <label>参考图（仅存档 / 预览）</label>
+          <input id="is-library-reference-file" type="file" accept="image/*" class="is-file" />
+          <div class="is-library-reference-row">
+            <img id="is-library-reference-preview" class="is-library-reference" alt="角色参考图" hidden />
+            <button type="button" class="is-link" id="is-library-reference-clear" hidden>移除参考图</button>
+          </div>
+        </div>
+        <div class="is-inline-actions">
+          <button type="button" class="menu_button is-primary" id="is-library-save">保存</button>
+          <button type="button" class="menu_button" id="is-library-cancel">取消</button>
+        </div>
+      </div>
+    </section>
+
     <section class="is-pane" data-is-pane="api" hidden>
       <div class="is-seg is-seg-wide" id="is-api-kind">
         <button type="button" data-is-api-kind="image" class="active"><i class="fa-solid fa-image"></i> 生图 API</button>
@@ -427,6 +479,39 @@ export function panelTemplate() {
       <button type="button" class="menu_button" id="is-lb-bg"><i class="fa-solid fa-image"></i> 设为背景</button>
       <button type="button" class="menu_button" id="is-lb-chat"><i class="fa-solid fa-comment"></i> 插入聊天</button>
     </div>
+  </div>
+</div>
+<div id="is-confirm" class="is-confirm" hidden>
+  <div class="is-confirm-panel">
+    <div class="is-confirm-head">
+      <b><i class="fa-solid fa-wand-magic-sparkles"></i> 确认生图</b>
+      <button type="button" class="is-icon-button" id="is-confirm-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="is-confirm-target" class="is-hint"></div>
+    <div class="is-field">
+      <label>场景提示词（可编辑）</label>
+      <textarea id="is-confirm-scene" class="text_pole is-textarea" rows="4"></textarea>
+    </div>
+    <details class="is-negative-wrap">
+      <summary>负面提示词</summary>
+      <textarea id="is-confirm-negative" class="text_pole is-textarea" rows="2"></textarea>
+    </details>
+    <div class="is-field">
+      <div class="is-field-head"><label>角色库角色</label><span class="is-hint">勾选后会追加外貌/服装文字</span></div>
+      <div id="is-confirm-characters" class="is-confirm-characters"></div>
+      <div id="is-confirm-refs" class="is-confirm-refs"></div>
+      <div><button type="button" class="is-link" id="is-confirm-open-library">编辑角色库</button></div>
+    </div>
+    <details class="is-request">
+      <summary>最终提示词预览</summary>
+      <pre id="is-confirm-final"></pre>
+    </details>
+    <div class="is-hint">参考图目前只用于角色库预览和存档；实际生成使用上方文字。需要图生图时，请在 ComfyUI 自定义工作流中接入参考图节点。</div>
+    <div class="is-inline-actions is-right">
+      <button type="button" class="menu_button" id="is-confirm-cancel">取消</button>
+      <button type="button" class="menu_button is-primary" id="is-confirm-generate">生成</button>
+    </div>
+    <div id="is-confirm-status" class="is-hint"></div>
   </div>
 </div>
 <div id="is-rewrite-overlay" class="is-overlay" hidden></div>

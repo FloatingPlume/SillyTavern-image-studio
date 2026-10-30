@@ -28,9 +28,9 @@ test('buildRewriteMessages puts the target message and visual-continuity rules i
     assert.match(messages[1].content, /A turns around under the rain/);
 });
 
-test('parseRewriteResult reads the expected JSON shape', () => {
-    const result = parseRewriteResult('{"positive":"a, b","negative":"lowres"}', 'fallback');
-    assert.deepEqual(result, { positive: 'a, b', negative: 'lowres' });
+test('parseRewriteResult reads the expected JSON shape and character selection', () => {
+    const result = parseRewriteResult('{"positive":"a, b","negative":"lowres","characters":["Aria"]}', 'fallback');
+    assert.deepEqual(result, { positive: 'a, b', negative: 'lowres', characters: ['Aria'] });
 });
 
 test('parseRewriteResult handles fenced JSON', () => {

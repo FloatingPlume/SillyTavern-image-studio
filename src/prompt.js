@@ -87,7 +87,7 @@ export function buildCharacterPrompt() {
     return [`masterpiece, best quality, ${name}`, description, scene].filter(Boolean).join(', ');
 }
 
-export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', systemOverride = null } = {}) {
+export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', libraryEntries = [], systemOverride = null } = {}) {
     const settings = get();
     const context = ctx();
     const char = context?.characters?.[context?.characterId] || {};
@@ -96,8 +96,15 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
         ? 'Write one natural-language paragraph in English. Include subject, appearance, action, environment, lighting, and composition.'
         : 'Write English Danbooru-style tags separated by commas. Put quality tags at the front. Keep it under 120 tags.';
 
+    const libraryText = (libraryEntries || [])
+        .filter(entry => entry?.name && (entry.appearance || entry.outfit))
+        .map(entry => `- ${entry.name}${entry.aliases?.length ? `（别名：${entry.aliases.join('、')}）` : ''}${entry.role === 'user' ? ' [用户角色]' : ''}: ${[entry.appearance, entry.outfit && `outfit: ${entry.outfit}`].filter(Boolean).join('; ')}`)
+        .join('\n');
+    const libraryRule = libraryText
+        ? ' A character library is provided below. Select only characters actually present in the target moment, list their exact names in "characters", and treat the library appearance/outfit as authoritative. Do not repeat fixed appearance details unnecessarily; focus the prompt on scene, action, expression, clothing changes and lighting.'
+        : '';
     const baseSystem = systemOverride != null ? systemOverride : (settings.prompt.rewriteSystem || '');
-    const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles. Return JSON only: {"positive":"...","negative":"..."}`;
+    const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles.${libraryRule} Return JSON only: {"positive":"...","negative":"...","characters":[]}`;
 
     const user = [
         `Character name: ${char.name || context?.name2 || 'unknown'}`,
@@ -105,6 +112,7 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
         `Personality: ${truncate(stripHtml(fields.personality || ''), 500) || '(not provided)'}`,
         `Scenario: ${truncate(stripHtml(fields.scenario || ''), 800) || '(not provided)'}`,
         `Recent chat:\n${truncate(recentMessages(settings.prompt.recentCount), 2200) || '(empty)'}`,
+        libraryText ? `Character library (authoritative):\n${truncate(libraryText, 3200)}` : '',
         `Target moment to illustrate: ${truncate(stripHtml(targetMessage), 1600) || '(use the latest scene)'}`,
         `What the user wants to see: ${intent || truncate(positive, 800) || 'an illustration of the current scene'}`,
         negative ? `Existing negative prompt: ${negative}` : '',
@@ -117,8 +125,8 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
     ];
 }
 
-export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '' } = {}) {
-    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, systemOverride: '' });
+export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', libraryEntries = [] } = {}) {
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, libraryEntries, systemOverride: '' });
     return `${messages[0].content}
 
 ${messages[1].content}`;
@@ -129,9 +137,13 @@ export function parseRewriteResult(text, fallbackNegative = '') {
     const parsed = parseJsonLoose(raw);
     let positive = '';
     let negative = fallbackNegative;
+    let characters = [];
     if (parsed && typeof parsed === 'object') {
         positive = String(parsed.positive || parsed.prompt || parsed.tags || '').trim();
         negative = String(parsed.negative || parsed.negative_prompt || fallbackNegative || '').trim();
+        characters = Array.isArray(parsed.characters)
+            ? parsed.characters.map(name => String(name || '').trim()).filter(Boolean)
+            : [];
     }
     if (!positive) {
         positive = raw
@@ -143,12 +155,16 @@ export function parseRewriteResult(text, fallbackNegative = '') {
             if (retry && typeof retry === 'object') {
                 positive = String(retry.positive || retry.prompt || retry.tags || '').trim();
                 negative = String(retry.negative || retry.negative_prompt || negative || '').trim();
+                characters = Array.isArray(retry.characters)
+                    ? retry.characters.map(name => String(name || '').trim()).filter(Boolean)
+                    : characters;
             }
         }
     }
     return {
         positive: positive.replace(/^["']|["']$/g, '').trim(),
         negative: negative.replace(/^["']|["']$/g, '').trim(),
+        characters,
     };
 }
 
