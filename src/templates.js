@@ -74,6 +74,21 @@ export function panelTemplate() {
             </select>
           </label>
         </div>
+        <div class="is-field">
+          <div class="is-field-head">
+            <label>系统提示词</label>
+            <button type="button" class="is-link" id="is-rewrite-system-reset">恢复内置</button>
+          </div>
+          <select id="is-rewrite-system-source" class="text_pole">
+            <option value="st">酒馆当前预设（系统提示词 + 正则）</option>
+            <option value="builtin">画坊内置</option>
+            <option value="custom">自定义</option>
+          </select>
+          <div id="is-rewrite-system-text-wrap" hidden>
+            <textarea id="is-rewrite-system-text" class="text_pole is-textarea is-mono" rows="4"></textarea>
+          </div>
+          <div id="is-rewrite-system-hint" class="is-hint"></div>
+        </div>
         <div id="is-rewrite-profile-wrap" class="is-field" hidden>
           <label>画坊聊天档案</label>
           <select id="is-rewrite-profile" class="text_pole"></select>

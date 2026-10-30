@@ -87,7 +87,7 @@ export function buildCharacterPrompt() {
     return [`masterpiece, best quality, ${name}`, description, scene].filter(Boolean).join(', ');
 }
 
-export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '' } = {}) {
+export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', systemOverride = null } = {}) {
     const settings = get();
     const context = ctx();
     const char = context?.characters?.[context?.characterId] || {};
@@ -113,6 +113,13 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
         { role: 'system', content: system },
         { role: 'user', content: user },
     ];
+}
+
+export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '' } = {}) {
+    const messages = buildRewriteMessages({ style, intent, positive, negative, systemOverride: '' });
+    return `${messages[0].content}
+
+${messages[1].content}`;
 }
 
 export function parseRewriteResult(text, fallbackNegative = '') {

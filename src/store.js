@@ -57,6 +57,8 @@ function defaultSettings() {
             template: DEFAULT_PROMPT_TEMPLATE,
             negative: DEFAULT_NEGATIVE,
             rewriteSystem: DEFAULT_REWRITE_SYSTEM,
+            rewriteSystemSource: 'st',
+            rewriteSystemCustom: DEFAULT_REWRITE_SYSTEM,
             recentCount: 6,
             rewriteMode: 'current',
             rewriteProfileId: '',

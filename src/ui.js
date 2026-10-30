@@ -17,6 +17,7 @@ import {
 } from './store.js';
 import {
     buildCharacterPrompt,
+    buildQuietRewritePrompt,
     buildRewriteMessages,
     expandPrompt,
     insertAtCursor,
@@ -60,6 +61,7 @@ import {
     listConnectionProfiles,
     rewriteWithConnectionProfile,
     rewriteWithCurrentApi,
+    rewriteWithCurrentPreset,
     switchConnectionProfile,
 } from './chat.js';
 import {
@@ -337,6 +339,8 @@ function refreshForm() {
     setValue('is-rewrite-intent', '');
     setValue('is-rewrite-style', settings.prompt.style || 'tags');
     setValue('is-rewrite-source', settings.prompt.rewriteMode || 'current');
+    setValue('is-rewrite-system-source', settings.prompt.rewriteSystemSource || 'st');
+    setValue('is-rewrite-system-text', settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem || '');
 
     rebuildSizeOptions();
     syncProviderUI();
@@ -512,6 +516,29 @@ function renderRewriteSelects() {
     }
     setValue('is-rewrite-style', settings.prompt.style || 'tags');
     setValue('is-rewrite-source', settings.prompt.rewriteMode || 'current');
+    syncRewriteSourceVisibility();
+    syncRewriteSystemUI();
+}
+
+function syncRewriteSystemUI() {
+    const source = valueOf('is-rewrite-system-source') || 'st';
+    const settings = get();
+    const useStPreset = source === 'st';
+    setHidden('is-rewrite-system-text-wrap', useStPreset);
+    const sourceSelect = el('is-rewrite-source');
+    if (sourceSelect) {
+        sourceSelect.disabled = useStPreset;
+        if (useStPreset) sourceSelect.value = 'current';
+    }
+    if (source === 'builtin') {
+        setValue('is-rewrite-system-text', settings.prompt.rewriteSystem || '');
+        setText('is-rewrite-system-hint', '使用画坊内置的视觉提示词规范；编辑下方文本会自动转为自定义。');
+    } else if (source === 'custom') {
+        setValue('is-rewrite-system-text', settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem || '');
+        setText('is-rewrite-system-hint', '使用你填写的系统提示词；是否被上游接受取决于模型/服务商策略。');
+    } else {
+        setText('is-rewrite-system-hint', '使用酒馆当前预设、系统提示词与常规输出处理；会强制走酒馆当前聊天 API。');
+    }
     syncRewriteSourceVisibility();
 }
 
@@ -1441,32 +1468,45 @@ async function runRewrite() {
     if (ui.rewriteBusy) return;
     const settings = get();
     const source = valueOf('is-rewrite-source') || 'current';
+    const systemSource = valueOf('is-rewrite-system-source') || 'st';
     const style = valueOf('is-rewrite-style') || 'tags';
     const intent = String(valueOf('is-rewrite-intent') || '').trim();
     const positive = String(valueOf('is-positive') || '').trim();
     const negative = String(valueOf('is-negative') || '').trim();
     settings.prompt.style = style;
-    settings.prompt.rewriteMode = source;
+    settings.prompt.rewriteSystemSource = systemSource;
+    settings.prompt.rewriteMode = systemSource === 'st' ? 'current' : source;
+    if (systemSource === 'custom') {
+        settings.prompt.rewriteSystemCustom = valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom;
+    }
     saveSoon();
 
-    const messages = buildRewriteMessages({ style, intent, positive, negative });
     ui.rewriteBusy = true;
-    setText('is-rewrite-status', '请求中…');
+    setText('is-rewrite-status', systemSource === 'st' ? '使用酒馆当前预设请求中…' : '请求中…');
     const button = el('is-rewrite-run');
     if (button) button.disabled = true;
     try {
         let raw = '';
-        if (source === 'current') {
-            raw = await rewriteWithCurrentApi(messages, 700);
-        } else if (source === 'profile') {
-            const profile = settings.chatProfiles.find(item => item.id === settings.prompt.rewriteProfileId) || settings.chatProfiles[0];
-            if (!profile) throw new Error('还没有聊天 API 档案，请到 API 页添加');
-            raw = await chatComplete(profile, messages, { maxTokens: 700, temperature: 0.75 });
+        if (systemSource === 'st') {
+            const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative });
+            raw = await rewriteWithCurrentPreset(quietPrompt, 800);
         } else {
-            const profiles = listConnectionProfiles();
-            const profile = profiles.find(item => item.id === settings.prompt.rewriteConnectionProfileId) || profiles[0];
-            if (!profile) throw new Error('酒馆里还没有连接配置');
-            raw = await rewriteWithConnectionProfile(profile.id, messages, 700);
+            const systemOverride = systemSource === 'custom'
+                ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
+                : settings.prompt.rewriteSystem;
+            const messages = buildRewriteMessages({ style, intent, positive, negative, systemOverride });
+            if (source === 'current') {
+                raw = await rewriteWithCurrentApi(messages, 700);
+            } else if (source === 'profile') {
+                const profile = settings.chatProfiles.find(item => item.id === settings.prompt.rewriteProfileId) || settings.chatProfiles[0];
+                if (!profile) throw new Error('还没有聊天 API 档案，请到 API 页添加');
+                raw = await chatComplete(profile, messages, { maxTokens: 700, temperature: 0.75 });
+            } else {
+                const profiles = listConnectionProfiles();
+                const profile = profiles.find(item => item.id === settings.prompt.rewriteConnectionProfileId) || profiles[0];
+                if (!profile) throw new Error('酒馆里还没有连接配置');
+                raw = await rewriteWithConnectionProfile(profile.id, messages, 700);
+            }
         }
         const parsed = parseRewriteResult(raw, negative);
         if (!parsed.positive) throw new Error('模型没有给出可用的提示词');
@@ -1685,6 +1725,15 @@ function bindEvents() {
         }
         if (target.closest('#is-rewrite-run')) {
             runRewrite();
+            return;
+        }
+        if (target.closest('#is-rewrite-system-reset')) {
+            const settings = get();
+            settings.prompt.rewriteSystemCustom = settings.prompt.rewriteSystem;
+            settings.prompt.rewriteSystemSource = 'builtin';
+            setValue('is-rewrite-system-source', 'builtin');
+            saveSoon();
+            syncRewriteSystemUI();
             return;
         }
         if (target.closest('#is-add-lora')) {
@@ -1997,6 +2046,13 @@ function bindEvents() {
                 break;
             case 'is-rewrite-intent':
                 break;
+            case 'is-rewrite-system-text':
+                settings.prompt.rewriteSystemCustom = target.value;
+                settings.prompt.rewriteSystemSource = 'custom';
+                setValue('is-rewrite-system-source', 'custom');
+                setText('is-rewrite-system-hint', '使用你填写的系统提示词；是否被上游接受取决于模型/服务商策略。');
+                saveSoon();
+                break;
             case 'is-model-search':
                 ui.modelQuery = target.value;
                 renderModelBrowser();
@@ -2106,6 +2162,14 @@ function bindEvents() {
             case 'is-rewrite-style':
                 settings.prompt.style = target.value;
                 saveSoon();
+                break;
+            case 'is-rewrite-system-source':
+                settings.prompt.rewriteSystemSource = target.value;
+                if (target.value === 'custom' && !settings.prompt.rewriteSystemCustom) {
+                    settings.prompt.rewriteSystemCustom = settings.prompt.rewriteSystem;
+                }
+                saveSoon();
+                syncRewriteSystemUI();
                 break;
             case 'is-rewrite-source':
                 settings.prompt.rewriteMode = target.value;

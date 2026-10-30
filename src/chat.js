@@ -335,6 +335,18 @@ export async function rewriteWithConnectionProfile(profileId, messages, maxToken
     return result?.content || result?.text || result?.message?.content || '';
 }
 
+export async function rewriteWithCurrentPreset(quietPrompt, maxTokens = 800) {
+    const context = ctx();
+    if (!context?.generateQuietPrompt) throw new Error('当前酒馆版本不支持按预设改写');
+    return await context.generateQuietPrompt({
+        quietPrompt,
+        quietToLoud: false,
+        quietName: '画坊改写',
+        responseLength: maxTokens,
+        removeReasoning: true,
+    });
+}
+
 export async function rewriteWithCurrentApi(messages, maxTokens = 700) {
     const context = ctx();
     if (!context?.generateRaw) throw new Error('当前酒馆版本不支持 generateRaw');
