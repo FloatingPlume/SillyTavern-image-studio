@@ -105,6 +105,7 @@ const ui = {
     staleMessages: new Set(),
     chatEventsBound: false,
     disableMessageRestore: false,
+    messageGenBusy: false,
 };
 
 let monitorComfy = new ComfyService();
@@ -1476,16 +1477,19 @@ function reuseEntry(entry) {
 
 async function requestRewrite({ style, intent, positive, negative, targetMessage = '' }) {
     const settings = get();
+    const chat = ctx()?.chat || [];
+    const lastAssistant = [...chat].reverse().find(message => message && !message.is_user && !message.is_system);
+    const target = targetMessage || stripHtml(lastAssistant?.mes || '');
     const systemSource = valueOf('is-rewrite-system-source') || settings.prompt.rewriteSystemSource || 'st';
     const source = systemSource === 'st' ? 'current' : (valueOf('is-rewrite-source') || settings.prompt.rewriteMode || 'current');
     if (systemSource === 'st') {
-        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage });
+        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage: target });
         return await rewriteWithCurrentPreset(quietPrompt, 800);
     }
     const systemOverride = systemSource === 'custom'
         ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
         : settings.prompt.rewriteSystem;
-    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, systemOverride });
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage: target, systemOverride });
     if (source === 'current') {
         return await rewriteWithCurrentApi(messages, 700);
     }
@@ -1793,10 +1797,11 @@ function attachMessageResult(messageId, result) {
 }
 
 async function generateFromMessage(messageId) {
-    if (job.active) {
+    if (job.active || ui.messageGenBusy) {
         toast('warning', '已有画坊生成任务在运行，等它完成再点');
         return;
     }
+    ui.messageGenBusy = true;
     const context = ctx();
     const message = context?.chat?.[messageId];
     if (!message || message.is_user || message.is_system) return;
@@ -1824,10 +1829,11 @@ async function generateFromMessage(messageId) {
         negative = parsed.negative || negative;
     } catch (error) {
         console.warn('[画坊] 场景提取失败，使用消息原文兜底', error);
-        positive = [buildCharacterPrompt(), target].filter(Boolean).join(', ');
+        positive = [buildCharacterPrompt(), truncate(target, 1200)].filter(Boolean).join(', ');
     }
     positive = expandText(positive);
     if (!positive) {
+        ui.messageGenBusy = false;
         button?.classList.remove('is-busy');
         setMessageState(messageId, '没有可用的提示词', true);
         return;
@@ -1844,6 +1850,7 @@ async function generateFromMessage(messageId) {
         onUpdate: snapshot => {
             if (snapshot.status === 'done') return;
             if (snapshot.status === 'cancelled') {
+                ui.messageGenBusy = false;
                 button?.classList.remove('is-busy');
                 setMessageState(messageId, '已停止', true);
                 setTimeout(refreshMessageGenButton, 50);
@@ -1862,12 +1869,14 @@ async function generateFromMessage(messageId) {
             renderHistory();
         },
         onDone: () => {
+            ui.messageGenBusy = false;
             button?.classList.remove('is-busy');
             setTimeout(refreshMessageGenButton, 50);
             renderJob();
             toast('success', '画坊：消息插画已生成');
         },
         onError: error => {
+            ui.messageGenBusy = false;
             button?.classList.remove('is-busy');
             setMessageState(messageId, `生成失败：${truncate(error?.message || error, 80)}`, true);
             setTimeout(refreshMessageGenButton, 50);
@@ -1881,6 +1890,7 @@ async function generateFromMessage(messageId) {
             await generateComfy(callbacks, { positive, negative, meta });
         }
     } catch (error) {
+        ui.messageGenBusy = false;
         button?.classList.remove('is-busy');
         setMessageState(messageId, `生成失败：${truncate(error.message || error, 80)}`, true);
         toast('error', `画坊消息生图失败：${truncate(error.message || error, 350)}`);
