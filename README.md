@@ -1,5 +1,7 @@
 # 画坊 · Image Studio
 
+仓库：<https://github.com/FloatingPlume/SillyTavern-image-studio>
+
 SillyTavern 1.18+ 的图像生成与 API 管理扩展。一个面板里同时管理本地 ComfyUI、云端生图 API、聊天 API、余额和生成记录。
 
 ## 功能
@@ -22,10 +24,10 @@ SillyTavern 1.18+ 的图像生成与 API 管理扩展。一个面板里同时管
 酒馆菜单 → **扩展** → **安装扩展**，填入仓库地址，例如：
 
 ```text
-https://github.com/你的用户名/image-studio
+https://github.com/FloatingPlume/SillyTavern-image-studio
 ```
 
-或 Gitee 地址。安装后刷新酒馆，魔杖菜单里会出现 **画坊**。
+或 Gitee 镜像地址。安装后刷新酒馆，魔杖菜单里会出现 **画坊**。
 
 ### SillyDroid 需要额外打开跨域代理
 
