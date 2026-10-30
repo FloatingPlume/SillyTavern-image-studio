@@ -65,6 +65,7 @@ import {
 } from './discovery.js';
 import { defaultImageProfile } from './providers.js';
 import { initFloatingCat, renderCat } from './floating-cat.js';
+import { normalizeContextMessages, resolvePluginRoute } from './plugin-model.js';
 import { queryBalance, formatBalance, balanceDetails } from './balance.js';
 import {
     applyChatProfile,
@@ -190,7 +191,7 @@ export function initUI() {
     renderApi();
     renderHistory();
     renderCurrentChat();
-    renderRewriteSelects();
+    renderPluginModel();
     bindChatMessageEvents();
     initFloatingCat({
         openPanel: () => openPanel('generate'),
@@ -269,7 +270,7 @@ function openPanel(tab = null) {
     renderApi();
     renderHistory();
     renderCurrentChat();
-    renderRewriteSelects();
+    renderPluginModel();
     refreshMessageGenButton();
     restoreMessageThumbnails();
     if (get().comfy.url) silentProbe();
@@ -294,7 +295,7 @@ function closePanel() {
 }
 
 function switchTab(tab) {
-    const target = ['generate', 'monitor', 'api', 'history'].includes(tab) ? tab : 'generate';
+    const target = ['generate', 'monitor', 'library', 'api', 'history'].includes(tab) ? tab : 'generate';
     ui.tab = target;
     get().ui.lastTab = target;
     saveSoon();
@@ -371,7 +372,6 @@ function refreshForm() {
     setValue('is-autosave', settings.ui.autoSave !== false);
     setValue('is-rewrite-intent', '');
     setValue('is-rewrite-style', settings.prompt.style || 'tags');
-    setValue('is-rewrite-source', settings.prompt.rewriteMode || 'current');
     setValue('is-rewrite-system-source', settings.prompt.rewriteSystemSource || 'st');
     setValue('is-rewrite-system-text', settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem || '');
 
@@ -380,10 +380,9 @@ function refreshForm() {
     refreshComfySelects();
     renderLoras();
     renderCloudProfiles();
-    renderRewriteSelects();
+    renderPluginModel();
     syncWorkflowVisibility();
     syncHiresVisibility();
-    syncRewriteSourceVisibility();
     setConnection(ui.connection, el('is-header-status-text')?.textContent || 'ComfyUI 未连接');
     renderRequestDetails();
     renderResults();
@@ -524,62 +523,91 @@ function renderCloudProfiles() {
     }
 }
 
-function renderRewriteSelects() {
+function currentPluginRoute() {
+    return resolvePluginRoute(get(), {
+        connectionProfiles: listConnectionProfiles(),
+        current: currentChatConfig(),
+    });
+}
+
+function renderPluginModel() {
     const settings = get();
-    const chatSelect = el('is-rewrite-profile');
-    const connectionSelect = el('is-rewrite-connection');
+    const routeSettings = settings.pluginModel;
+    setValue('is-plugin-mode', routeSettings.mode || 'current');
+    setValue('is-plugin-context', routeSettings.contextMessages ?? 4);
+    const chatSelect = el('is-plugin-profile');
     if (chatSelect) {
         const profiles = settings.chatProfiles || [];
         chatSelect.innerHTML = profiles.length
-            ? profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === settings.prompt.rewriteProfileId ? 'selected' : ''}>${escapeHtml(profile.name)} · ${escapeHtml(profile.model || '未设模型')}</option>`).join('')
-            : '<option value="">（没有聊天档案）</option>';
-        if (!settings.prompt.rewriteProfileId && profiles.length) {
-            settings.prompt.rewriteProfileId = profiles[0].id;
+            ? profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === routeSettings.profileId ? 'selected' : ''}>${escapeHtml(profile.name)} · ${escapeHtml(profile.model || '未设模型')}</option>`).join('')
+            : '<option value="">（没有画坊聊天 API，去下方添加）</option>';
+        if (routeSettings.mode === 'profile' && profiles.length && !profiles.some(profile => profile.id === routeSettings.profileId)) {
+            routeSettings.profileId = profiles[0].id;
             saveSoon();
         }
+        chatSelect.value = routeSettings.profileId || '';
     }
+    const connectionSelect = el('is-plugin-connection');
     if (connectionSelect) {
         const profiles = listConnectionProfiles();
         connectionSelect.innerHTML = profiles.length
-            ? profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === settings.prompt.rewriteConnectionProfileId ? 'selected' : ''}>${escapeHtml(profile.name)}</option>`).join('')
+            ? profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === routeSettings.connectionProfileId ? 'selected' : ''}>${escapeHtml(profile.name)}${profile.model ? ` · ${escapeHtml(profile.model)}` : ''}</option>`).join('')
             : '<option value="">（酒馆没有连接配置）</option>';
-        if (!settings.prompt.rewriteConnectionProfileId && profiles.length) {
-            settings.prompt.rewriteConnectionProfileId = profiles[0].id;
+        if (routeSettings.mode === 'connection' && profiles.length && !profiles.some(profile => profile.id === routeSettings.connectionProfileId)) {
+            routeSettings.connectionProfileId = profiles[0].id;
             saveSoon();
         }
+        connectionSelect.value = routeSettings.connectionProfileId || '';
     }
-    setValue('is-rewrite-style', settings.prompt.style || 'tags');
-    setValue('is-rewrite-source', settings.prompt.rewriteMode || 'current');
-    syncRewriteSourceVisibility();
+    syncPluginModelVisibility();
+    renderPluginRouteLine();
+}
+
+function syncPluginModelVisibility() {
+    const mode = valueOf('is-plugin-mode') || 'current';
+    setHidden('is-plugin-profile-wrap', mode !== 'profile');
+    setHidden('is-plugin-connection-wrap', mode !== 'connection');
+}
+
+function renderPluginRouteLine() {
+    const route = currentPluginRoute();
+    const count = normalizeContextMessages(get().pluginModel.contextMessages);
+    setText('is-rewrite-route', route.ready ? route.label : `${route.label}（未就绪）`);
+    let text = '';
+    if (route.mode === 'current') {
+        text = '当前跟随酒馆聊天 API；系统提示词选“酒馆当前预设”时会连预设和正则一起使用。';
+    } else if (!route.ready) {
+        text = `当前：${route.label}。请先选择或创建对应配置。`;
+    } else {
+        text = `当前：${route.label}。独立调用，不改变酒馆聊天 API${route.mode === 'connection' ? '，也不带酒馆预设' : ''}。`;
+    }
+    setText('is-plugin-status', `${text} 每次附带 ${count} 条最近消息。`);
     syncRewriteSystemUI();
 }
 
 function syncRewriteSystemUI() {
-    const source = valueOf('is-rewrite-system-source') || 'st';
     const settings = get();
-    const useStPreset = source === 'st';
+    const route = currentPluginRoute();
+    const select = el('is-rewrite-system-source');
+    const stOption = select?.querySelector('option[value="st"]');
+    if (stOption) stOption.disabled = route.mode !== 'current';
+    const requested = select?.value || settings.prompt.rewriteSystemSource || 'st';
+    const effective = requested === 'st' && route.mode !== 'current' ? 'builtin' : requested;
+    if (select && select.value !== effective) select.value = effective;
+    const useStPreset = effective === 'st';
     setHidden('is-rewrite-system-text-wrap', useStPreset);
-    const sourceSelect = el('is-rewrite-source');
-    if (sourceSelect) {
-        sourceSelect.disabled = useStPreset;
-        if (useStPreset) sourceSelect.value = 'current';
-    }
-    if (source === 'builtin') {
+    if (effective === 'builtin') {
         setValue('is-rewrite-system-text', settings.prompt.rewriteSystem || '');
         setText('is-rewrite-system-hint', '使用画坊内置的视觉提示词规范；编辑下方文本会自动转为自定义。');
-    } else if (source === 'custom') {
+    } else if (effective === 'custom') {
         setValue('is-rewrite-system-text', settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem || '');
         setText('is-rewrite-system-hint', '使用你填写的系统提示词；是否被上游接受取决于模型/服务商策略。');
     } else {
-        setText('is-rewrite-system-hint', '使用酒馆当前预设、系统提示词与常规输出处理；会强制走酒馆当前聊天 API。');
+        setText('is-rewrite-system-hint', '使用酒馆当前预设、系统提示词与常规输出处理；会走酒馆当前聊天 API。');
     }
-    syncRewriteSourceVisibility();
-}
-
-function syncRewriteSourceVisibility() {
-    const source = valueOf('is-rewrite-source') || 'current';
-    setHidden('is-rewrite-profile-wrap', source !== 'profile');
-    setHidden('is-rewrite-connection-wrap', source !== 'connection');
+    if (requested === 'st' && route.mode !== 'current') {
+        setText('is-rewrite-system-hint', '插件内部模型是独立链路，不能使用酒馆预设；本次使用画坊内置系统提示词。');
+    }
 }
 
 function syncWorkflowVisibility() {
@@ -618,6 +646,7 @@ function renderApi() {
     document.querySelectorAll('[data-is-api-kind]').forEach(button => {
         button.classList.toggle('active', button.dataset.isApiKind === ui.apiKind);
     });
+    renderPluginModel();
     const list = el('is-api-list');
     if (!list) return;
     const kind = ui.apiKind;
@@ -631,18 +660,21 @@ function renderApi() {
             const balanceTitle = balance ? escapeHtml(balanceDetails(balance)) : '点击查询余额';
             const isDefault = kind === 'image'
                 ? settings.cloud.profileId === profile.id
-                : settings.prompt.rewriteProfileId === profile.id;
+                : settings.pluginModel.mode === 'profile' && settings.pluginModel.profileId === profile.id;
             const applyButton = kind === 'chat'
                 ? `<button type="button" class="is-link" data-api-action="apply" data-id="${escapeHtml(profile.id)}">应用到酒馆</button>`
                 : '';
             const defaultButton = kind === 'image'
                 ? `<button type="button" class="is-link" data-api-action="default" data-id="${escapeHtml(profile.id)}">${isDefault ? '当前默认' : '设为默认'}</button>`
-                : `<button type="button" class="is-link" data-api-action="use-rewrite" data-id="${escapeHtml(profile.id)}">${isDefault ? '当前改写' : '用于改写'}</button>`;
+                : `<button type="button" class="is-link" data-api-action="use-plugin" data-id="${escapeHtml(profile.id)}">${isDefault ? '当前插件模型' : '设为插件模型'}</button>`;
+            const defaultBadge = isDefault
+                ? `<span class="is-badge">${kind === 'image' ? '默认' : '插件模型'}</span>`
+                : '';
             return `<div class="is-api-card ${isDefault ? 'is-default' : ''}" data-api-id="${escapeHtml(profile.id)}">
                 <div class="is-api-card-head">
                     <span class="is-api-name">${escapeHtml(profile.name)}</span>
                     <span class="is-badge">${escapeHtml(typeLabel(kind, profile.type))}</span>
-                    ${isDefault ? '<span class="is-badge">默认</span>' : ''}
+                    ${defaultBadge}
                     <span class="is-grow"></span>
                     <span class="is-badge is-balance ${balance && !balance.ok ? 'is-error' : ''}" data-api-action="balance" data-id="${escapeHtml(profile.id)}" title="${balanceTitle}">${escapeHtml(balanceText)}</span>
                 </div>
@@ -659,7 +691,6 @@ function renderApi() {
         }).join('');
     }
     renderConnectionProfiles();
-    renderRewriteSelects();
 }
 
 function renderConnectionProfiles() {
@@ -670,12 +701,17 @@ function renderConnectionProfiles() {
         node.innerHTML = '<div class="is-hint">酒馆里还没有连接配置。可以先在酒馆的连接配置里创建，再回来切换。</div>';
         return;
     }
-    node.innerHTML = profiles.map(profile => `<div class="is-connection-item">
+    const route = get().pluginModel;
+    node.innerHTML = profiles.map(profile => {
+        const selected = route.mode === 'connection' && route.connectionProfileId === profile.id;
+        return `<div class="is-connection-item">
         <span class="is-api-name">${escapeHtml(profile.name)}</span>
+        ${selected ? '<span class="is-badge">插件模型</span>' : ''}
         <span class="is-grow">${escapeHtml(profile.model || '')}</span>
         <button type="button" class="is-link" data-connection-action="switch" data-name="${escapeHtml(profile.name)}">切换</button>
-        <button type="button" class="is-link" data-connection-action="rewrite" data-id="${escapeHtml(profile.id)}">用于改写</button>
-    </div>`).join('');
+        <button type="button" class="is-link" data-connection-action="plugin" data-id="${escapeHtml(profile.id)}">${selected ? '当前插件模型' : '设为插件模型'}</button>
+    </div>`;
+    }).join('');
 }
 
 function renderHistory() {
@@ -1283,8 +1319,8 @@ function saveProfileEditor() {
             settings.cloud.profileId = profile.id;
             settings.cloud.model = profile.model;
         }
-        if (profile.kind === 'chat' && !settings.prompt.rewriteProfileId) {
-            settings.prompt.rewriteProfileId = profile.id;
+        if (profile.kind === 'chat' && !settings.pluginModel.profileId) {
+            settings.pluginModel.profileId = profile.id;
         }
         const shouldFetchModels = !profile.models.length && canAutoFetchModels(profile);
         save();
@@ -1503,54 +1539,84 @@ function reuseEntry(entry) {
     toast('success', '参数已复用');
 }
 
-async function requestRewrite({ style, intent, positive, negative, targetMessage = '', libraryEntries = [] }) {
+async function requestRewrite({ style, intent, positive, negative, targetMessage = '', targetIndex = null, libraryEntries = [] }) {
     const settings = get();
     const chat = ctx()?.chat || [];
-    const lastAssistant = [...chat].reverse().find(message => message && !message.is_user && !message.is_system);
-    const target = targetMessage || stripHtml(lastAssistant?.mes || '');
-    const systemSource = valueOf('is-rewrite-system-source') || settings.prompt.rewriteSystemSource || 'st';
-    const source = systemSource === 'st' ? 'current' : (valueOf('is-rewrite-source') || settings.prompt.rewriteMode || 'current');
+    let target = targetMessage;
+    let index = Number.isInteger(targetIndex) ? targetIndex : null;
+    if (!target) {
+        for (let cursor = chat.length - 1; cursor >= 0; cursor -= 1) {
+            const message = chat[cursor];
+            if (!message?.mes || message.is_user || message.is_system) continue;
+            target = stripHtml(message.mes);
+            if (index == null) index = cursor;
+            break;
+        }
+    }
+    const route = currentPluginRoute();
+    const select = el('is-rewrite-system-source');
+    const requestedSource = select?.value || settings.prompt.rewriteSystemSource || 'st';
+    const systemSource = requestedSource === 'st' && route.mode !== 'current' ? 'builtin' : requestedSource;
+    const contextMessages = normalizeContextMessages(settings.pluginModel.contextMessages);
     if (systemSource === 'st') {
-        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage: target, libraryEntries });
+        const quietPrompt = buildQuietRewritePrompt({
+            style,
+            intent,
+            positive,
+            negative,
+            targetMessage: target,
+            targetIndex: index,
+            libraryEntries,
+            contextMessages,
+        });
         return await rewriteWithCurrentPreset(quietPrompt, 800);
     }
     const systemOverride = systemSource === 'custom'
         ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
         : settings.prompt.rewriteSystem;
-    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage: target, libraryEntries, systemOverride });
-    if (source === 'current') {
+    const messages = buildRewriteMessages({
+        style,
+        intent,
+        positive,
+        negative,
+        targetMessage: target,
+        targetIndex: index,
+        libraryEntries,
+        systemOverride,
+        contextMessages,
+    });
+    if (route.mode === 'current') {
         return await rewriteWithCurrentApi(messages, 700);
     }
-    if (source === 'profile') {
-        const profile = settings.chatProfiles.find(item => item.id === settings.prompt.rewriteProfileId) || settings.chatProfiles[0];
-        if (!profile) throw new Error('还没有聊天 API 档案，请到 API 页添加');
-        return await chatComplete(profile, messages, { maxTokens: 700, temperature: 0.75 });
+    if (route.mode === 'profile') {
+        if (!route.profile) throw new Error('插件内部模型未就绪：请到 API 页选择画坊聊天 API');
+        return await chatComplete(route.profile, messages, { maxTokens: 700, temperature: 0.75 });
     }
-    const profiles = listConnectionProfiles();
-    const profile = profiles.find(item => item.id === settings.prompt.rewriteConnectionProfileId) || profiles[0];
-    if (!profile) throw new Error('酒馆里还没有连接配置');
-    return await rewriteWithConnectionProfile(profile.id, messages, 700);
+    if (!route.connection) throw new Error('插件内部模型未就绪：请到 API 页选择酒馆连接配置');
+    return await rewriteWithConnectionProfile(route.connection.id, messages, 700);
 }
 
 async function runRewrite() {
     if (ui.rewriteBusy) return;
     const settings = get();
-    const source = valueOf('is-rewrite-source') || 'current';
     const systemSource = valueOf('is-rewrite-system-source') || 'st';
     const style = valueOf('is-rewrite-style') || 'tags';
     const intent = String(valueOf('is-rewrite-intent') || '').trim();
     const positive = String(valueOf('is-positive') || '').trim();
     const negative = String(valueOf('is-negative') || '').trim();
+    const route = currentPluginRoute();
+    const effectiveSource = systemSource === 'st' && route.mode !== 'current' ? 'builtin' : systemSource;
     settings.prompt.style = style;
-    settings.prompt.rewriteSystemSource = systemSource;
-    settings.prompt.rewriteMode = systemSource === 'st' ? 'current' : source;
+    settings.prompt.rewriteSystemSource = effectiveSource;
     if (systemSource === 'custom') {
         settings.prompt.rewriteSystemCustom = valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom;
     }
     saveSoon();
 
     ui.rewriteBusy = true;
-    setText('is-rewrite-status', systemSource === 'st' ? '使用酒馆当前预设请求中…' : '请求中…');
+    setText('is-rewrite-status', effectiveSource === 'st'
+        ? '使用酒馆当前预设请求中…'
+        : `使用插件内部模型（${route.label}）请求中…`);
     const button = el('is-rewrite-run');
     if (button) button.disabled = true;
     try {
@@ -2036,9 +2102,12 @@ async function effectiveLibraryEntries() {
     }
 }
 
-function recentContextText() {
+function recentContextText(beforeIndex = null) {
     const chat = ctx()?.chat || [];
-    return chat.slice(-5)
+    const limit = normalizeContextMessages(get().pluginModel.contextMessages);
+    if (!limit) return '';
+    const end = Number.isInteger(beforeIndex) ? Math.min(beforeIndex, chat.length) : chat.length;
+    return chat.slice(Math.max(0, end - limit), end)
         .map(message => `${message.name || (message.is_user ? 'User' : 'Character')}: ${stripHtml(message.mes || '')}`)
         .join('\n');
 }
@@ -2147,6 +2216,7 @@ async function openMessageSceneConfirm(messageId) {
             positive: '',
             negative,
             targetMessage: target,
+            targetIndex: Number(messageId),
             libraryEntries: entries,
         });
         const parsed = parseRewriteResult(raw, negative);
@@ -2164,7 +2234,7 @@ async function openMessageSceneConfirm(messageId) {
         return;
     }
     const aiMatches = matchCharacterNames(entries, aiCharacters);
-    const textMatches = matchPresentCharacters(entries, `${target}\n${recentContextText()}`);
+    const textMatches = matchPresentCharacters(entries, `${target}\n${recentContextText(Number(messageId))}`);
     let selected = [...new Map([...aiMatches, ...textMatches].map(entry => [entry.id, entry])).values()];
     if (!selected.length) selected = defaultPresentCharacters(entries);
     const selectedIds = new Set(selected.map(entry => entry.id));
@@ -2414,6 +2484,11 @@ function bindEvents() {
             if (box) box.hidden = !box.hidden;
             return;
         }
+        if (target.closest('#is-rewrite-route-settings')) {
+            switchTab('api');
+            document.querySelector('#is-panel .is-plugin-model')?.scrollIntoView({ block: 'center' });
+            return;
+        }
         if (target.closest('#is-rewrite-run')) {
             runRewrite();
             return;
@@ -2633,7 +2708,10 @@ function bindEvents() {
                     removeProfile(kind, profile.id);
                     const settings = get();
                     if (kind === 'image' && settings.cloud.profileId === profile.id) settings.cloud.profileId = '';
-                    if (kind === 'chat' && settings.prompt.rewriteProfileId === profile.id) settings.prompt.rewriteProfileId = '';
+                    if (kind === 'chat' && settings.pluginModel.profileId === profile.id) {
+                        settings.pluginModel.profileId = '';
+                        if (!settings.chatProfiles.length) settings.pluginModel.mode = 'current';
+                    }
                     save();
                     renderApi();
                     renderCloudProfiles();
@@ -2647,13 +2725,12 @@ function bindEvents() {
                 renderApi();
                 renderCloudProfiles();
                 syncProviderUI();
-            } else if (action === 'use-rewrite') {
-                get().prompt.rewriteProfileId = id;
-                get().prompt.rewriteMode = 'profile';
+            } else if (action === 'use-plugin') {
+                get().pluginModel.mode = 'profile';
+                get().pluginModel.profileId = id;
                 save();
                 renderApi();
-                renderRewriteSelects();
-                toast('success', '已设为改写用的聊天 API');
+                toast('success', '已设为插件内部模型（不会改变酒馆聊天 API）');
             } else if (action === 'test') {
                 testProfileById(id, kind);
             } else if (action === 'balance') {
@@ -2676,11 +2753,11 @@ function bindEvents() {
                     }).catch(error => toast('error', error.message));
                 });
             } else {
-                get().prompt.rewriteConnectionProfileId = connectionAction.dataset.id;
-                get().prompt.rewriteMode = 'connection';
+                get().pluginModel.mode = 'connection';
+                get().pluginModel.connectionProfileId = connectionAction.dataset.id;
                 save();
-                renderRewriteSelects();
-                toast('success', '已设为改写用的酒馆连接配置');
+                renderApi();
+                toast('success', '已设为插件内部模型（不会改变酒馆聊天 API）');
             }
             return;
         }
@@ -2800,6 +2877,12 @@ function bindEvents() {
                 setValue('is-rewrite-system-source', 'custom');
                 setText('is-rewrite-system-hint', '使用你填写的系统提示词；是否被上游接受取决于模型/服务商策略。');
                 saveSoon();
+                break;
+            case 'is-plugin-context':
+                if (target.value === '') break;
+                settings.pluginModel.contextMessages = normalizeContextMessages(target.value);
+                saveSoon();
+                renderPluginRouteLine();
                 break;
             case 'is-model-search':
                 ui.modelQuery = target.value;
@@ -2934,19 +3017,28 @@ function bindEvents() {
                 saveSoon();
                 syncRewriteSystemUI();
                 break;
-            case 'is-rewrite-source':
-                settings.prompt.rewriteMode = target.value;
+            case 'is-plugin-mode':
+                settings.pluginModel.mode = ['current', 'profile', 'connection'].includes(target.value) ? target.value : 'current';
                 saveSoon();
-                syncRewriteSourceVisibility();
+                renderApi();
                 break;
-            case 'is-rewrite-profile':
-                settings.prompt.rewriteProfileId = target.value;
+            case 'is-plugin-profile':
+                settings.pluginModel.profileId = target.value;
                 saveSoon();
+                renderApi();
                 break;
-            case 'is-rewrite-connection':
-                settings.prompt.rewriteConnectionProfileId = target.value;
+            case 'is-plugin-connection':
+                settings.pluginModel.connectionProfileId = target.value;
                 saveSoon();
+                renderApi();
                 break;
+            case 'is-plugin-context': {
+                settings.pluginModel.contextMessages = normalizeContextMessages(target.value);
+                setValue('is-plugin-context', settings.pluginModel.contextMessages);
+                saveSoon();
+                renderPluginRouteLine();
+                break;
+            }
             case 'is-profile-type':
                 syncEditorVisibility();
                 ui.editorModels = [];

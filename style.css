@@ -380,6 +380,35 @@
     font-size: 11.5px;
 }
 
+.is-route-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 7px;
+    border: 1px dashed var(--is-border);
+    border-radius: 7px;
+    background: var(--is-soft);
+    color: var(--is-muted);
+    font-size: 11px;
+}
+
+.is-route-line > i {
+    color: var(--is-accent);
+}
+
+.is-route-line b {
+    color: var(--is-fg);
+    font-weight: 600;
+}
+
+.is-route-line .is-grow {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 details > summary {
     cursor: pointer;
     color: var(--is-muted);

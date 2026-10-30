@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildRewriteMessages, parseRewriteResult } from '../src/prompt.js';
-import { initStore } from '../src/store.js';
+import { get, initStore } from '../src/store.js';
 
 test('buildRewriteMessages puts the target message and visual-continuity rules into the request', () => {
     globalThis.SillyTavern = {
@@ -31,6 +31,37 @@ test('buildRewriteMessages puts the target message and visual-continuity rules i
 test('parseRewriteResult reads the expected JSON shape and character selection', () => {
     const result = parseRewriteResult('{"positive":"a, b","negative":"lowres","characters":["Aria"]}', 'fallback');
     assert.deepEqual(result, { positive: 'a, b', negative: 'lowres', characters: ['Aria'] });
+});
+
+test('buildRewriteMessages only sends the configured number of preceding messages', () => {
+    globalThis.SillyTavern = {
+        getContext: () => ({
+            extensionSettings: {},
+            eventTypes: {},
+            eventSource: { on() {}, once() {}, emit() {} },
+            chat: [
+                { is_user: true, name: 'User', mes: 'first line' },
+                { is_user: false, name: 'A', mes: 'second line' },
+                { is_user: true, name: 'User', mes: 'third line' },
+                { is_user: false, name: 'A', mes: 'fourth line' },
+                { is_user: false, name: 'A', mes: 'target line' },
+            ],
+            characters: [{ name: 'A' }],
+            characterId: 0,
+            name1: 'User',
+            name2: 'A',
+            getCharacterCardFields: () => ({ description: 'a wolf' }),
+            substituteParams: value => value,
+        }),
+    };
+    initStore();
+    get().pluginModel.contextMessages = 2;
+    const messages = buildRewriteMessages({ targetMessage: 'target line', targetIndex: 4 });
+    assert.match(messages[1].content, /third line/);
+    assert.match(messages[1].content, /fourth line/);
+    assert.doesNotMatch(messages[1].content, /first line/);
+    assert.doesNotMatch(messages[1].content, /second line/);
+    assert.equal(messages[1].content.match(/target line/g).length, 1);
 });
 
 test('parseRewriteResult handles fenced JSON', () => {

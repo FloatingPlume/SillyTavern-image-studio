@@ -6,6 +6,7 @@ import {
     HISTORY_LIMIT,
     SETTINGS_KEY,
 } from './constants.js';
+import { normalizePluginRoute } from './plugin-model.js';
 import { ctx, deepMerge, uid } from './util.js';
 
 function defaultSettings() {
@@ -52,6 +53,12 @@ function defaultSettings() {
         },
         imageProfiles: [],
         chatProfiles: [],
+        pluginModel: {
+            mode: 'current',
+            profileId: '',
+            connectionProfileId: '',
+            contextMessages: 4,
+        },
         prompt: {
             style: 'tags',
             template: DEFAULT_PROMPT_TEMPLATE,
@@ -60,9 +67,6 @@ function defaultSettings() {
             rewriteSystemSource: 'st',
             rewriteSystemCustom: DEFAULT_REWRITE_SYSTEM,
             recentCount: 6,
-            rewriteMode: 'current',
-            rewriteProfileId: '',
-            rewriteConnectionProfileId: '',
         },
         draft: {
             positive: '',
@@ -95,6 +99,14 @@ export function initStore() {
     const defaults = defaultSettings();
     const merged = deepMerge(defaults, existing);
     merged.version = 1;
+    const legacyRoute = existing?.pluginModel ? null : existing?.prompt;
+    const hadPluginModel = existing && typeof existing.pluginModel === 'object' && existing.pluginModel !== null;
+    merged.pluginModel = normalizePluginRoute(hadPluginModel ? merged.pluginModel : {}, legacyRoute || {});
+    if (merged.prompt) {
+        delete merged.prompt.rewriteMode;
+        delete merged.prompt.rewriteProfileId;
+        delete merged.prompt.rewriteConnectionProfileId;
+    }
     if (!Array.isArray(merged.imageProfiles)) merged.imageProfiles = [];
     if (!Array.isArray(merged.chatProfiles)) merged.chatProfiles = [];
     if (!Array.isArray(merged.history)) merged.history = [];

@@ -58,20 +58,18 @@ export function panelTemplate() {
       </div>
 
       <div id="is-rewrite-box" class="is-subbox" hidden>
-        <div class="is-subbox-title">让聊天模型写成生图提示词 <span class="is-hint">会消耗一次聊天请求</span></div>
+        <div class="is-subbox-title">让插件内部模型写成生图提示词 <span class="is-hint">独立链路，不会切换聊天 API</span></div>
         <input id="is-rewrite-intent" class="text_pole" type="text" placeholder="画面意图（可留空，例如：雨后屋檐下回头）" />
-        <div class="is-grid is-grid-2">
+        <div class="is-route-line">
+          <i class="fa-solid fa-microchip"></i>
+          <span class="is-grow">插件内部模型：<b id="is-rewrite-route">跟随酒馆当前聊天 API</b></span>
+          <button type="button" class="is-link" id="is-rewrite-route-settings">设置</button>
+        </div>
+        <div class="is-field">
           <label>风格
             <select id="is-rewrite-style" class="text_pole">
               <option value="tags">标签风（SD / Danbooru）</option>
               <option value="natural">自然语言（Gemini / GPT Image）</option>
-            </select>
-          </label>
-          <label>使用
-            <select id="is-rewrite-source" class="text_pole">
-              <option value="current">酒馆当前聊天 API</option>
-              <option value="profile">画坊聊天档案</option>
-              <option value="connection">酒馆连接配置</option>
             </select>
           </label>
         </div>
@@ -81,7 +79,7 @@ export function panelTemplate() {
             <button type="button" class="is-link" id="is-rewrite-system-reset">恢复内置</button>
           </div>
           <select id="is-rewrite-system-source" class="text_pole">
-            <option value="st">酒馆当前预设（系统提示词 + 正则）</option>
+            <option value="st">酒馆当前预设（需跟随当前聊天 API）</option>
             <option value="builtin">画坊内置</option>
             <option value="custom">自定义</option>
           </select>
@@ -89,14 +87,6 @@ export function panelTemplate() {
             <textarea id="is-rewrite-system-text" class="text_pole is-textarea is-mono" rows="4"></textarea>
           </div>
           <div id="is-rewrite-system-hint" class="is-hint"></div>
-        </div>
-        <div id="is-rewrite-profile-wrap" class="is-field" hidden>
-          <label>画坊聊天档案</label>
-          <select id="is-rewrite-profile" class="text_pole"></select>
-        </div>
-        <div id="is-rewrite-connection-wrap" class="is-field" hidden>
-          <label>酒馆连接配置</label>
-          <select id="is-rewrite-connection" class="text_pole"></select>
         </div>
         <div class="is-inline-actions is-right">
           <button type="button" class="menu_button" id="is-rewrite-run">改写</button>
@@ -386,6 +376,33 @@ export function panelTemplate() {
       <div class="is-hint">API Key 保存在酒馆设置里，和酒馆其他 API Key 同级；不要分享 settings.json。</div>
       <div id="is-current-chat" class="is-brief is-current-chat"></div>
 
+      <div class="is-card is-plugin-model">
+        <div class="is-card-title"><i class="fa-solid fa-microchip"></i> 插件内部模型 <span class="is-hint">场景提取 · 角色挑选 · 提示词改写</span></div>
+        <div class="is-hint">只影响画坊自己的 AI 任务；不会切换或修改酒馆聊天 API、预设和角色扮演。可以单独选一个便宜的小模型，并限制附带的上下文条数。</div>
+        <div class="is-field">
+          <label for="is-plugin-mode">使用</label>
+          <select id="is-plugin-mode" class="text_pole">
+            <option value="current">跟随酒馆当前聊天 API</option>
+            <option value="profile">画坊聊天 API 档案（可单独选模型）</option>
+            <option value="connection">酒馆连接配置（不带预设）</option>
+          </select>
+        </div>
+        <div id="is-plugin-profile-wrap" class="is-field" hidden>
+          <label for="is-plugin-profile">画坊聊天 API</label>
+          <select id="is-plugin-profile" class="text_pole"></select>
+        </div>
+        <div id="is-plugin-connection-wrap" class="is-field" hidden>
+          <label for="is-plugin-connection">酒馆连接配置</label>
+          <select id="is-plugin-connection" class="text_pole"></select>
+        </div>
+        <div class="is-field">
+          <label for="is-plugin-context">附带最近消息数</label>
+          <input id="is-plugin-context" class="text_pole" type="number" min="0" max="20" step="1" />
+          <div class="is-hint">画坊请求里附带的消息条数；0 表示只发目标消息。酒馆预设可能再带自己的上下文；聊天记录本身不会改动。</div>
+        </div>
+        <div id="is-plugin-status" class="is-hint"></div>
+      </div>
+
       <div id="is-api-list" class="is-api-list"></div>
 
       <div class="is-subbox">
@@ -534,7 +551,7 @@ export function settingsDrawerTemplate() {
     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
   </div>
   <div class="inline-drawer-content">
-    <div class="is-hint">本地 ComfyUI 生图、云端生图、API 与余额管理。默认手动写提示词，需要时再让聊天模型改写。</div>
+    <div class="is-hint">本地 ComfyUI 生图、云端生图、API 与余额管理。默认手动写提示词，需要时再让插件内部模型改写。</div>
     <div class="is-inline-actions">
       <button type="button" class="menu_button" id="is-open-from-settings">打开画坊</button>
       <span id="is-settings-status" class="is-hint"></span>

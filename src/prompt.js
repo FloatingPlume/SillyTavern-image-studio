@@ -11,11 +11,20 @@ function characterFields() {
     }
 }
 
-function recentMessages(limit = 6) {
+export function selectContextMessages(chat, { beforeIndex = null, limit = 4 } = {}) {
+    const list = Array.isArray(chat) ? chat : [];
+    const count = Math.max(0, Math.min(20, Math.round(Number(limit) || 0)));
+    if (!count) return [];
+    const end = Number.isInteger(beforeIndex) && beforeIndex >= 0
+        ? Math.min(beforeIndex, list.length)
+        : list.length;
+    return list.slice(Math.max(0, end - count), end);
+}
+
+function recentMessages(limit = 6, { beforeIndex = null } = {}) {
     const context = ctx();
     const chat = Array.isArray(context?.chat) ? context.chat : [];
-    return chat
-        .slice(-Math.max(1, limit))
+    return selectContextMessages(chat, { beforeIndex, limit })
         .map(message => `${message.name || (message.is_user ? 'User' : 'Character')}: ${stripHtml(message.mes || '')}`)
         .filter(line => line.trim())
         .join('\n');
@@ -87,7 +96,17 @@ export function buildCharacterPrompt() {
     return [`masterpiece, best quality, ${name}`, description, scene].filter(Boolean).join(', ');
 }
 
-export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', libraryEntries = [], systemOverride = null } = {}) {
+export function buildRewriteMessages({
+    style = 'tags',
+    intent = '',
+    positive = '',
+    negative = '',
+    targetMessage = '',
+    targetIndex = null,
+    libraryEntries = [],
+    systemOverride = null,
+    contextMessages = null,
+} = {}) {
     const settings = get();
     const context = ctx();
     const char = context?.characters?.[context?.characterId] || {};
@@ -106,12 +125,16 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
     const baseSystem = systemOverride != null ? systemOverride : (settings.prompt.rewriteSystem || '');
     const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles.${libraryRule} Return JSON only: {"positive":"...","negative":"...","characters":[]}`;
 
+    const count = contextMessages == null
+        ? settings.pluginModel?.contextMessages ?? 4
+        : contextMessages;
+    const previous = truncate(recentMessages(count, { beforeIndex: targetIndex }), 2200);
     const user = [
         `Character name: ${char.name || context?.name2 || 'unknown'}`,
         `Character appearance: ${truncate(stripHtml(fields.description || ''), 1200) || '(not provided)'}`,
         `Personality: ${truncate(stripHtml(fields.personality || ''), 500) || '(not provided)'}`,
         `Scenario: ${truncate(stripHtml(fields.scenario || ''), 800) || '(not provided)'}`,
-        `Recent chat:\n${truncate(recentMessages(settings.prompt.recentCount), 2200) || '(empty)'}`,
+        previous ? `Previous messages (${count}):\n${previous}` : '',
         libraryText ? `Character library (authoritative):\n${truncate(libraryText, 3200)}` : '',
         `Target moment to illustrate: ${truncate(stripHtml(targetMessage), 1600) || '(use the latest scene)'}`,
         `What the user wants to see: ${intent || truncate(positive, 800) || 'an illustration of the current scene'}`,
@@ -125,8 +148,8 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
     ];
 }
 
-export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', libraryEntries = [] } = {}) {
-    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, libraryEntries, systemOverride: '' });
+export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', targetIndex = null, libraryEntries = [], contextMessages = null } = {}) {
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, targetIndex, libraryEntries, systemOverride: '', contextMessages });
     return `${messages[0].content}
 
 ${messages[1].content}`;
