@@ -23,3 +23,10 @@ test('panel template contains the main UI containers', () => {
         assert.match(html, new RegExp(`id="${id}"`));
     }
 });
+
+test('panel input sizing does not stretch checkboxes to full width', () => {
+    const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+    assert.match(css, /#is-panel input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\)/);
+    assert.match(css, /#is-panel \.is-library-candidate input\[type="checkbox"\]/);
+    assert.match(css, /\.is-library-candidate-body\s*\{[^}]*flex:\s*1 1 auto/s);
+});

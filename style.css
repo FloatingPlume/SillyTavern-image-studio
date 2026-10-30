@@ -1031,7 +1031,7 @@ details > summary {
 
 #is-panel .text_pole,
 #is-panel select,
-#is-panel input,
+#is-panel input:not([type="checkbox"]):not([type="radio"]),
 #is-panel textarea {
     font-size: 12px;
     width: 100%;
@@ -1377,14 +1377,17 @@ details > summary {
     font-size: 10.5px;
 }
 
-.is-library-candidate input {
+#is-panel .is-library-candidate input[type="checkbox"] {
+    flex: 0 0 auto;
     width: auto;
-    margin-top: 2px;
+    max-width: 22px;
+    margin: 2px 0 0;
 }
 
 .is-library-candidate-body {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     gap: 2px;
     min-width: 0;
 }
