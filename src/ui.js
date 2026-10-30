@@ -671,7 +671,7 @@ function renderResults() {
     node.innerHTML = job.results.map((result, index) => {
         const url = result.path ? imageUrl(result.path) : (result._url || '');
         return `<div class="is-result">
-            <img src="${escapeHtml(url)}" alt="生成结果" data-result-view="${index}" loading="lazy" />
+            <img src="${escapeHtml(url)}" alt="生成结果" data-result-view="${index}" />
             <div class="is-result-actions">
                 <button type="button" data-result-action="view" data-index="${index}" title="查看"><i class="fa-solid fa-expand"></i></button>
                 <button type="button" data-result-action="download" data-index="${index}" title="下载"><i class="fa-solid fa-download"></i></button>
