@@ -38,7 +38,7 @@ test('xAI image body uses aspect_ratio/resolution and never sends size', () => {
     });
     assert.equal(body.size, undefined);
     assert.equal(body.aspect_ratio, '3:2');
-    assert.equal(body.resolution, '2K');
+    assert.equal(body.resolution, '2k');
     assert.equal(body.response_format, 'url');
     assert.equal(body.n, 2);
     assert.equal(body.negative_prompt, undefined);

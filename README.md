@@ -129,7 +129,7 @@ Base URL: https://api.siliconflow.cn/v1
 
 云端 API 的负面提示词和 seed 只会对 **OpenAI 兼容中转** 默认发送；其他接口请用“固定额外请求体 JSON”补充模型专属参数。OpenAI 官方 DALL·E 3 的 `n` 必须为 1。
 
-**xAI 特别注意：** xAI 的图片接口不接受 OpenAI 风格的 `size`。画坊对 `grok-imagine-*` 会发送 `aspect_ratio` 和 `resolution`（1K/2K），对旧版 `grok-2-image` 不发送尺寸参数，只保留 `n` / `response_format`。所以界面里的宽高只影响 Grok Imagine 的构图比例，不是精确像素尺寸。
+**xAI 特别注意：** xAI 的图片接口不接受 OpenAI 风格的 `size`。画坊对 `grok-imagine-*` 会发送 `aspect_ratio` 和 `resolution`（`1k`/`2k`），对旧版 `grok-2-image` 不发送尺寸参数，只保留 `n` / `response_format`。所以界面里的宽高只影响 Grok Imagine 的构图比例，不是精确像素尺寸。
 
 ## 余额查询
 

@@ -121,7 +121,7 @@ export function buildOpenAIImageBody(profile, params) {
         };
         if (/grok-imagine/i.test(model)) {
             body.aspect_ratio = sizeToAspect(width, height);
-            body.resolution = Math.max(width, height) >= 1536 ? '2K' : '1K';
+            body.resolution = Math.max(width, height) >= 1536 ? '2k' : '1k';
         }
         return { ...body, ...extra };
     }
