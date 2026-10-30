@@ -87,7 +87,7 @@ export function buildCharacterPrompt() {
     return [`masterpiece, best quality, ${name}`, description, scene].filter(Boolean).join(', ');
 }
 
-export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', systemOverride = null } = {}) {
+export function buildRewriteMessages({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '', systemOverride = null } = {}) {
     const settings = get();
     const context = ctx();
     const char = context?.characters?.[context?.characterId] || {};
@@ -96,7 +96,8 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
         ? 'Write one natural-language paragraph in English. Include subject, appearance, action, environment, lighting, and composition.'
         : 'Write English Danbooru-style tags separated by commas. Put quality tags at the front. Keep it under 120 tags.';
 
-    const system = `${settings.prompt.rewriteSystem || ''}\n${stylePrompt}\nReturn JSON only: {"positive":"...","negative":"..."}`;
+    const baseSystem = systemOverride != null ? systemOverride : (settings.prompt.rewriteSystem || '');
+    const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles. Return JSON only: {"positive":"...","negative":"..."}`;
 
     const user = [
         `Character name: ${char.name || context?.name2 || 'unknown'}`,
@@ -104,6 +105,7 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
         `Personality: ${truncate(stripHtml(fields.personality || ''), 500) || '(not provided)'}`,
         `Scenario: ${truncate(stripHtml(fields.scenario || ''), 800) || '(not provided)'}`,
         `Recent chat:\n${truncate(recentMessages(settings.prompt.recentCount), 2200) || '(empty)'}`,
+        `Target moment to illustrate: ${truncate(stripHtml(targetMessage), 1600) || '(use the latest scene)'}`,
         `What the user wants to see: ${intent || truncate(positive, 800) || 'an illustration of the current scene'}`,
         negative ? `Existing negative prompt: ${negative}` : '',
         'Keep the character visually consistent. Do not invent a different character.',
@@ -115,8 +117,8 @@ export function buildRewriteMessages({ style = 'tags', intent = '', positive = '
     ];
 }
 
-export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '' } = {}) {
-    const messages = buildRewriteMessages({ style, intent, positive, negative, systemOverride: '' });
+export function buildQuietRewritePrompt({ style = 'tags', intent = '', positive = '', negative = '', targetMessage = '' } = {}) {
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, systemOverride: '' });
     return `${messages[0].content}
 
 ${messages[1].content}`;

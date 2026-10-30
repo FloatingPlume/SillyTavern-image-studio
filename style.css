@@ -1135,3 +1135,67 @@ details > summary {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.is-gen-image-button {
+    color: var(--SmartThemeQuoteColor, #8fb8a7) !important;
+}
+
+.is-gen-image-button.is-busy {
+    pointer-events: none;
+    opacity: 0.55;
+}
+
+.is-message-image-slot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin: 5px 0 2px;
+}
+
+.is-message-thumb {
+    position: relative;
+    display: block;
+    width: 58px;
+    height: 58px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.25));
+    border-radius: 6px;
+    background: var(--black30a, rgba(0, 0, 0, 0.3));
+    cursor: zoom-in;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.is-message-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.is-message-thumb .is-thumb-label {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 1px 2px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 9px;
+    line-height: 1.3;
+    text-align: center;
+}
+
+.is-message-gen-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--SmartThemeEmColor, #9a9a9a);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.is-message-gen-state.is-error {
+    color: #e06c75;
+}

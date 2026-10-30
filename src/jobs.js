@@ -309,6 +309,8 @@ function buildHistoryEntry(result, provider) {
         height: details.height,
         createdAt: Date.now(),
         promptId: job.promptId,
+        messageId: details.messageId ?? null,
+        chatId: details.chatId || '',
     };
 }
 
@@ -319,7 +321,7 @@ function endJob(keepResults = true) {
     emit({});
 }
 
-export async function generateComfy(callbacks, { positive = '', negative = '' } = {}) {
+export async function generateComfy(callbacks, { positive = '', negative = '', meta = {} } = {}) {
     if (job.active) throw new Error('已有生成任务进行中');
     const settings = get();
     const comfy = new ComfyService();
@@ -337,6 +339,7 @@ export async function generateComfy(callbacks, { positive = '', negative = '' } 
         profileName: 'ComfyUI',
         model: settings.comfy.checkpoint,
         workflow: null,
+        ...meta,
     };
     resetJob('comfy', callbacks, details);
     job.comfy = comfy;
@@ -436,7 +439,7 @@ export async function generateComfy(callbacks, { positive = '', negative = '' } 
     }
 }
 
-export async function generateCloud(callbacks, { positive = '', negative = '' } = {}) {
+export async function generateCloud(callbacks, { positive = '', negative = '', meta = {} } = {}) {
     if (job.active) throw new Error('已有生成任务进行中');
     const settings = get();
     const profile = getActiveImageProfile() || settings.imageProfiles[0];
@@ -457,6 +460,7 @@ export async function generateCloud(callbacks, { positive = '', negative = '' } 
         width,
         height,
         count: Number(settings.cloud.count || 1),
+        ...meta,
     };
     resetJob('cloud', callbacks, details);
     const controller = new AbortController();

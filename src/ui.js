@@ -26,10 +26,12 @@ import {
 import {
     clamp,
     ctx,
+    debounce,
     escapeHtml,
     formatBytes,
     imagePathToUrl,
     parseJsonLoose,
+    stripHtml,
     toast,
     truncate,
 } from './util.js';
@@ -99,6 +101,10 @@ const ui = {
     modelsFetching: false,
     scanAbort: null,
     scanResults: [],
+    messageResults: new Map(),
+    staleMessages: new Set(),
+    chatEventsBound: false,
+    disableMessageRestore: false,
 };
 
 let monitorComfy = new ComfyService();
@@ -168,6 +174,7 @@ export function initUI() {
     renderHistory();
     renderCurrentChat();
     renderRewriteSelects();
+    bindChatMessageEvents();
     ui.initialized = true;
     window.ImageStudio = {
         open: openPanel,
@@ -240,6 +247,8 @@ function openPanel(tab = null) {
     renderHistory();
     renderCurrentChat();
     renderRewriteSelects();
+    refreshMessageGenButton();
+    restoreMessageThumbnails();
     if (get().comfy.url) silentProbe();
     updateSettingsStatus();
 }
@@ -1465,6 +1474,32 @@ function reuseEntry(entry) {
     toast('success', '参数已复用');
 }
 
+async function requestRewrite({ style, intent, positive, negative, targetMessage = '' }) {
+    const settings = get();
+    const systemSource = valueOf('is-rewrite-system-source') || settings.prompt.rewriteSystemSource || 'st';
+    const source = systemSource === 'st' ? 'current' : (valueOf('is-rewrite-source') || settings.prompt.rewriteMode || 'current');
+    if (systemSource === 'st') {
+        const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative, targetMessage });
+        return await rewriteWithCurrentPreset(quietPrompt, 800);
+    }
+    const systemOverride = systemSource === 'custom'
+        ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
+        : settings.prompt.rewriteSystem;
+    const messages = buildRewriteMessages({ style, intent, positive, negative, targetMessage, systemOverride });
+    if (source === 'current') {
+        return await rewriteWithCurrentApi(messages, 700);
+    }
+    if (source === 'profile') {
+        const profile = settings.chatProfiles.find(item => item.id === settings.prompt.rewriteProfileId) || settings.chatProfiles[0];
+        if (!profile) throw new Error('还没有聊天 API 档案，请到 API 页添加');
+        return await chatComplete(profile, messages, { maxTokens: 700, temperature: 0.75 });
+    }
+    const profiles = listConnectionProfiles();
+    const profile = profiles.find(item => item.id === settings.prompt.rewriteConnectionProfileId) || profiles[0];
+    if (!profile) throw new Error('酒馆里还没有连接配置');
+    return await rewriteWithConnectionProfile(profile.id, messages, 700);
+}
+
 async function runRewrite() {
     if (ui.rewriteBusy) return;
     const settings = get();
@@ -1487,28 +1522,7 @@ async function runRewrite() {
     const button = el('is-rewrite-run');
     if (button) button.disabled = true;
     try {
-        let raw = '';
-        if (systemSource === 'st') {
-            const quietPrompt = buildQuietRewritePrompt({ style, intent, positive, negative });
-            raw = await rewriteWithCurrentPreset(quietPrompt, 800);
-        } else {
-            const systemOverride = systemSource === 'custom'
-                ? (valueOf('is-rewrite-system-text') || settings.prompt.rewriteSystemCustom || settings.prompt.rewriteSystem)
-                : settings.prompt.rewriteSystem;
-            const messages = buildRewriteMessages({ style, intent, positive, negative, systemOverride });
-            if (source === 'current') {
-                raw = await rewriteWithCurrentApi(messages, 700);
-            } else if (source === 'profile') {
-                const profile = settings.chatProfiles.find(item => item.id === settings.prompt.rewriteProfileId) || settings.chatProfiles[0];
-                if (!profile) throw new Error('还没有聊天 API 档案，请到 API 页添加');
-                raw = await chatComplete(profile, messages, { maxTokens: 700, temperature: 0.75 });
-            } else {
-                const profiles = listConnectionProfiles();
-                const profile = profiles.find(item => item.id === settings.prompt.rewriteConnectionProfileId) || profiles[0];
-                if (!profile) throw new Error('酒馆里还没有连接配置');
-                raw = await rewriteWithConnectionProfile(profile.id, messages, 700);
-            }
-        }
+        const raw = await requestRewrite({ style, intent, positive, negative });
         const parsed = parseRewriteResult(raw, negative);
         if (!parsed.positive) throw new Error('模型没有给出可用的提示词');
         setValue('is-positive', parsed.positive);
@@ -1624,6 +1638,298 @@ async function useScanResult(url) {
     get().comfy.scanPort = portFromUrl(url);
     saveSoon();
     await testComfyWithModels();
+}
+
+function messageChatId() {
+    const context = ctx();
+    return String(context?.getCurrentChatId?.() || context?.chatId || '');
+}
+
+function lastCharacterMessageId() {
+    const chat = ctx()?.chat || [];
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        if (message && !message.is_user && !message.is_system) return index;
+    }
+    return -1;
+}
+
+function removeMessageArtifacts() {
+    document.querySelectorAll('.is-gen-image-button').forEach(node => node.remove());
+    document.querySelectorAll('.is-message-image-slot').forEach(node => node.remove());
+}
+
+function refreshMessageGenButton() {
+    document.querySelectorAll('.is-gen-image-button').forEach(node => node.remove());
+    const messageId = lastCharacterMessageId();
+    if (messageId < 0) return;
+    const buttons = document.querySelector(`.mes[mesid="${messageId}"] .mes_buttons`);
+    if (!buttons) return;
+    const button = document.createElement('div');
+    button.className = 'mes_button is-gen-image-button fa-solid fa-wand-magic-sparkles';
+    button.title = '画坊：按这条消息生成插画（后台）';
+    button.dataset.mesid = String(messageId);
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        generateFromMessage(messageId);
+    });
+    const edit = buttons.querySelector('.mes_edit');
+    buttons.insertBefore(button, edit || null);
+    if (job.active
+        && String(job.details?.messageId) === String(messageId)
+        && String(job.details?.chatId || '') === messageChatId()) {
+        button.classList.add('is-busy');
+    }
+}
+
+function messageSlot(messageId) {
+    const block = document.querySelector(`.mes[mesid="${messageId}"] .mes_block`);
+    if (!block) return null;
+    let slot = block.querySelector(`.is-message-image-slot[data-mesid="${messageId}"]`);
+    if (!slot) {
+        slot = document.createElement('div');
+        slot.className = 'is-message-image-slot';
+        slot.dataset.mesid = String(messageId);
+        const bias = block.querySelector('.mes_bias');
+        block.insertBefore(slot, bias || null);
+    }
+    return slot;
+}
+
+function setMessageState(messageId, text, isError = false) {
+    const slot = messageSlot(messageId);
+    if (!slot) return;
+    let state = slot.querySelector('.is-message-gen-state');
+    if (!state) {
+        slot.innerHTML = '';
+        state = document.createElement('div');
+        state.className = 'is-message-gen-state';
+        const icon = document.createElement('i');
+        const label = document.createElement('span');
+        state.append(icon, label);
+        slot.appendChild(state);
+    }
+    state.classList.toggle('is-error', !!isError);
+    const icon = state.querySelector('i');
+    if (icon) icon.className = `fa-solid ${isError ? 'fa-triangle-exclamation' : 'fa-spinner fa-spin'}`;
+    const label = state.querySelector('span');
+    if (label) label.textContent = text || '';
+}
+
+function renderMessageThumb(messageId, item) {
+    if (!item) return;
+    const slot = messageSlot(messageId);
+    if (!slot) return;
+    let url = item.path ? imageUrl(item.path) : item._url || '';
+    if (!url && item.blob) {
+        url = URL.createObjectURL(item.blob);
+        item._url = url;
+    }
+    if (!url) return;
+    slot.innerHTML = '';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'is-message-thumb';
+    button.title = '画坊生成 · 点击放大';
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = '画坊生成';
+    const label = document.createElement('span');
+    label.className = 'is-thumb-label';
+    label.textContent = '画坊';
+    button.append(image, label);
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openLightbox(item, 'message');
+    });
+    slot.appendChild(button);
+}
+
+function clearMessageSlot(messageId) {
+    document.querySelector(`.mes[mesid="${messageId}"] .is-message-image-slot`)?.remove();
+}
+
+function restoreMessageThumbnails() {
+    if (ui.disableMessageRestore) return;
+    const chatId = messageChatId();
+    const chat = ctx()?.chat || [];
+    const history = get().history || [];
+    for (let index = 0; index < chat.length; index += 1) {
+        if (chat[index]?.is_user || chat[index]?.is_system) continue;
+        if (ui.staleMessages.has(index)) continue;
+        const slot = document.querySelector(`.mes[mesid="${index}"] .is-message-image-slot`);
+        if (slot && slot.querySelector('.is-message-thumb, .is-message-gen-state')) continue;
+        let item = ui.messageResults.get(index);
+        if (!item) {
+            const entry = history.find(candidate =>
+                candidate.path
+                && Number(candidate.messageId) === index
+                && candidate.chatId === chatId);
+            if (entry) item = entry;
+        }
+        if (item) renderMessageThumb(index, item);
+    }
+}
+
+function attachMessageResult(messageId, result) {
+    if (!result) return;
+    const details = job.details || {};
+    const item = {
+        ...result,
+        positive: details.positive || result.positive || '',
+        negative: details.negative || result.negative || '',
+        model: details.model || details.checkpoint || '',
+        seed: details.seed,
+        createdAt: Date.now(),
+    };
+    ui.messageResults.set(Number(messageId), item);
+    ui.staleMessages.delete(Number(messageId));
+    const sourceChat = String(details.chatId || '');
+    if (!sourceChat || sourceChat === messageChatId()) {
+        renderMessageThumb(messageId, item);
+    }
+}
+
+async function generateFromMessage(messageId) {
+    if (job.active) {
+        toast('warning', '已有画坊生成任务在运行，等它完成再点');
+        return;
+    }
+    const context = ctx();
+    const message = context?.chat?.[messageId];
+    if (!message || message.is_user || message.is_system) return;
+    const settings = get();
+    const target = stripHtml(message.mes || '');
+    const chatId = messageChatId();
+    const button = document.querySelector(`.mes[mesid="${messageId}"] .is-gen-image-button`);
+    button?.classList.add('is-busy');
+    ui.staleMessages.delete(Number(messageId));
+    setMessageState(messageId, '提取场景…');
+
+    let positive = '';
+    let negative = settings.prompt.negative || '';
+    try {
+        const style = settings.prompt.style || 'tags';
+        const raw = await requestRewrite({
+            style,
+            intent: 'Illustrate this exact message as one cinematic image. Infer the location, lighting, pose, expression and mood from the target message and the preceding context. Do not paint dialogue text or UI.',
+            positive: '',
+            negative,
+            targetMessage: target,
+        });
+        const parsed = parseRewriteResult(raw, negative);
+        positive = parsed.positive;
+        negative = parsed.negative || negative;
+    } catch (error) {
+        console.warn('[画坊] 场景提取失败，使用消息原文兜底', error);
+        positive = [buildCharacterPrompt(), target].filter(Boolean).join(', ');
+    }
+    positive = expandText(positive);
+    if (!positive) {
+        button?.classList.remove('is-busy');
+        setMessageState(messageId, '没有可用的提示词', true);
+        return;
+    }
+    settings.draft.positive = positive;
+    settings.draft.negative = negative;
+    setValue('is-positive', positive);
+    setValue('is-negative', negative);
+    saveSoon();
+    setMessageState(messageId, '生成中…');
+
+    const meta = { messageId: Number(messageId), chatId, source: 'message' };
+    const callbacks = {
+        onUpdate: snapshot => {
+            if (snapshot.status === 'done') return;
+            if (snapshot.status === 'cancelled') {
+                button?.classList.remove('is-busy');
+                setMessageState(messageId, '已停止', true);
+                setTimeout(refreshMessageGenButton, 50);
+                return;
+            }
+            setMessageState(messageId, snapshot.statusText || '生成中…');
+            button?.classList.add('is-busy');
+            renderJob();
+            renderHistory();
+        },
+        onStats: stats => applyStats(stats),
+        onResult: results => {
+            if (results?.[0]) attachMessageResult(messageId, results[0]);
+            button?.classList.remove('is-busy');
+            renderResults();
+            renderHistory();
+        },
+        onDone: () => {
+            button?.classList.remove('is-busy');
+            setTimeout(refreshMessageGenButton, 50);
+            renderJob();
+            toast('success', '画坊：消息插画已生成');
+        },
+        onError: error => {
+            button?.classList.remove('is-busy');
+            setMessageState(messageId, `生成失败：${truncate(error?.message || error, 80)}`, true);
+            setTimeout(refreshMessageGenButton, 50);
+            renderJob();
+        },
+    };
+    try {
+        if (settings.provider === 'cloud') {
+            await generateCloud(callbacks, { positive, negative, meta });
+        } else {
+            await generateComfy(callbacks, { positive, negative, meta });
+        }
+    } catch (error) {
+        button?.classList.remove('is-busy');
+        setMessageState(messageId, `生成失败：${truncate(error.message || error, 80)}`, true);
+        toast('error', `画坊消息生图失败：${truncate(error.message || error, 350)}`);
+    }
+}
+
+function bindChatMessageEvents() {
+    if (ui.chatEventsBound) return;
+    const context = ctx();
+    const eventSource = context?.eventSource;
+    if (!eventSource?.on) return;
+    ui.chatEventsBound = true;
+    const types = context.eventTypes || context.event_types || {};
+    const schedule = debounce(() => {
+        refreshMessageGenButton();
+        restoreMessageThumbnails();
+    }, 100);
+    const names = ['CHARACTER_MESSAGE_RENDERED', 'MESSAGE_RECEIVED', 'MESSAGE_SWIPED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'CHAT_CHANGED', 'GENERATION_ENDED'];
+    for (const name of names) {
+        const eventName = types[name] || String(name).toLowerCase();
+        eventSource.on(eventName, (...args) => {
+            if (name === 'CHAT_CHANGED') {
+                removeMessageArtifacts();
+                ui.messageResults.clear();
+                ui.staleMessages.clear();
+                ui.disableMessageRestore = false;
+                setTimeout(schedule, 250);
+                return;
+            }
+            if (name === 'MESSAGE_DELETED') {
+                removeMessageArtifacts();
+                ui.messageResults.clear();
+                ui.staleMessages.clear();
+                ui.disableMessageRestore = true;
+                refreshMessageGenButton();
+                return;
+            }
+            if (name === 'MESSAGE_SWIPED' || name === 'MESSAGE_EDITED') {
+                const id = Number(args[0]);
+                if (Number.isInteger(id) && id >= 0) {
+                    ui.staleMessages.add(id);
+                    ui.messageResults.delete(id);
+                    clearMessageSlot(id);
+                }
+            }
+            schedule();
+        });
+    }
+    setTimeout(schedule, 700);
 }
 
 function bindEvents() {
