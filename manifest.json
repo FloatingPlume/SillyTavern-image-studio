@@ -1,0 +1,15 @@
+{
+    "display_name": "画坊 · Image Studio",
+    "loading_order": 60,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Image Studio contributors",
+    "version": "0.1.0",
+    "homePage": "",
+    "minimum_client_version": "1.18.0",
+    "hooks": {
+        "activate": "activate"
+    }
+}
