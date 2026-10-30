@@ -16,6 +16,8 @@ function defaultSettings() {
         comfy: {
             url: '',
             auth: '',
+            scanPrefix: '',
+            scanPort: 8188,
             checkpoint: '',
             sampler: '',
             scheduler: '',
@@ -114,6 +116,10 @@ export function ensureProfileShape(profile) {
     profile.baseUrl = String(profile.baseUrl || '');
     profile.apiKey = String(profile.apiKey || '');
     profile.model = String(profile.model || '');
+    if (!Array.isArray(profile.models)) profile.models = [];
+    profile.models = profile.models.map(item => String(item?.id || item || '').trim()).filter(Boolean);
+    profile.modelsFetchedAt = Number(profile.modelsFetchedAt || 0);
+    profile.modelsError = String(profile.modelsError || '');
     profile.headers = typeof profile.headers === 'string' ? profile.headers : JSON.stringify(profile.headers || {}, null, 2);
     profile.extraBody = typeof profile.extraBody === 'string' ? profile.extraBody : JSON.stringify(profile.extraBody || {}, null, 2);
     profile.balancePreset = profile.balancePreset || 'auto';

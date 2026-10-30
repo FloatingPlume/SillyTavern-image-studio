@@ -33,7 +33,23 @@ import {
     truncate,
 } from './util.js';
 import { ComfyService } from './comfy.js';
-import { defaultImageProfile, testImageProfile } from './providers.js';
+import {
+    MODEL_CATEGORIES,
+    canAutoFetchModels,
+    categoryCounts,
+    fetchProfileModels,
+    filterModels,
+    modelSummary,
+    normalizeModels,
+} from './model-catalog.js';
+import {
+    detectLocalSubnet,
+    normalizeScanPrefix,
+    portFromUrl,
+    prefixFromUrl,
+    scanComfy,
+} from './discovery.js';
+import { defaultImageProfile } from './providers.js';
 import { queryBalance, formatBalance, balanceDetails } from './balance.js';
 import {
     applyChatProfile,
@@ -45,7 +61,6 @@ import {
     rewriteWithConnectionProfile,
     rewriteWithCurrentApi,
     switchConnectionProfile,
-    testChatProfile,
 } from './chat.js';
 import {
     cancelJob,
@@ -76,6 +91,12 @@ const ui = {
     resultUrls: new Map(),
     rewriteBusy: false,
     lastErrorToast: '',
+    editorModels: [],
+    modelCategory: 'all',
+    modelQuery: '',
+    modelsFetching: false,
+    scanAbort: null,
+    scanResults: [],
 };
 
 let monitorComfy = new ComfyService();
@@ -231,6 +252,10 @@ function closePanel() {
     if (overlay) overlay.hidden = true;
     save();
     stopMonitor();
+    if (ui.scanAbort) {
+        ui.scanAbort.abort();
+        ui.scanAbort = null;
+    }
     closeLightbox();
 }
 
@@ -294,6 +319,8 @@ function refreshForm() {
     setValue('is-height', ui.provider === 'cloud' ? settings.cloud.height : settings.comfy.height);
     setValue('is-comfy-url', settings.comfy.url || '');
     setValue('is-comfy-auth', settings.comfy.auth || '');
+    setValue('is-scan-prefix', settings.comfy.scanPrefix || prefixFromUrl(settings.comfy.url) || '');
+    setValue('is-scan-port', settings.comfy.scanPort || portFromUrl(settings.comfy.url));
     setValue('is-comfy-proxy', settings.useServerProxy === false ? 'direct' : 'proxy');
     setValue('is-use-proxy', settings.useServerProxy !== false);
     setValue('is-hires-enabled', !!settings.comfy.hires?.enabled);
@@ -445,8 +472,15 @@ function renderCloudProfiles() {
         const cached = getBalanceCache(profile.id);
         const balanceText = cached?.ok ? ` · 余额 ${formatBalance(cached)}` : '';
         setText('is-cloud-hint', `${typeLabel('image', profile.type)} · ${profileHost(profile)} · ${profile.model || '未设默认模型'}${balanceText}`);
+        const imageModels = filterModels(profile.models || [], { category: 'image' }).map(item => item.id);
+        const fallbackModels = (profile.models || []).filter(Boolean);
+        const choices = imageModels.length ? imageModels : fallbackModels;
+        fillModelDatalist(choices, 'is-cloud-model-list');
+        setText('is-cloud-model-hint', choices.length
+            ? `已缓存 ${profile.models.length} 个模型 · 图像 ${imageModels.length} 个 · 下拉可筛选`
+            : '还没有模型缓存；到 API 页编辑这个档案，点“获取模型”。');
         if (!settings.cloud.model) {
-            settings.cloud.model = profile.model || '';
+            settings.cloud.model = profile.model || choices[0] || '';
             setValue('is-cloud-model', settings.cloud.model);
         }
     }
@@ -552,6 +586,7 @@ function renderApi() {
                     <span class="is-badge is-balance ${balance && !balance.ok ? 'is-error' : ''}" data-api-action="balance" data-id="${escapeHtml(profile.id)}" title="${balanceTitle}">${escapeHtml(balanceText)}</span>
                 </div>
                 <div class="is-api-meta">${escapeHtml(profileHost(profile))} · ${escapeHtml(profile.model || '未设模型')} · ${escapeHtml(maskKey(profile))}</div>
+                <div class="is-api-meta">${profile.models?.length ? `缓存 ${profile.models.length} 个模型 · ${escapeHtml(modelSummary(profile.models))}` : '未获取模型列表'}</div>
                 <div class="is-api-actions">
                     ${defaultButton}
                     ${applyButton}
@@ -817,6 +852,14 @@ async function testComfyWithModels() {
         const result = await monitorComfy.test();
         applyStats(ComfyService.parseSystemStats(result.stats));
         setText('is-comfy-status', `连接成功 · ${Date.now() - started}ms`);
+        const urlPrefix = prefixFromUrl(settings.comfy.url);
+        if (urlPrefix) {
+            settings.comfy.scanPrefix = urlPrefix;
+            settings.comfy.scanPort = portFromUrl(settings.comfy.url);
+            setValue('is-scan-prefix', urlPrefix);
+            setValue('is-scan-port', settings.comfy.scanPort);
+            saveSoon();
+        }
         const models = await monitorComfy.loadModels(true);
         ui.models = models;
         refreshComfySelects();
@@ -965,6 +1008,20 @@ function openProfileEditor(kind, profile = null) {
     setValue('is-profile-base', copy.baseUrl || '');
     setValue('is-profile-key', copy.apiKey || '');
     setValue('is-profile-model', copy.model || '');
+    setValue('is-model-search', '');
+    ui.editorModels = normalizeModels([...(copy.models || []), copy.model]);
+    ui.modelCategory = kind === 'chat' ? 'language' : 'image';
+    ui.modelQuery = '';
+    ui.editing.modelsFetchedAt = Number(copy.modelsFetchedAt || 0);
+    fillModelDatalist(ui.editorModels);
+    renderModelBrowser();
+    if (!ui.editorModels.length && canAutoFetchModels(copy)) {
+        const editingId = ui.editing.id;
+        setTimeout(() => {
+            if (!ui.editing || ui.editing.id !== editingId) return;
+            fetchEditorModels({ silent: true });
+        }, 350);
+    }
     setValue('is-profile-headers', copy.headers || '{}');
     setValue('is-profile-extra', copy.extraBody || '{}');
     const balanceSelect = el('is-profile-balance');
@@ -994,6 +1051,98 @@ function openProfileEditor(kind, profile = null) {
         setTimeout(() => editor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
         const first = el('is-profile-name');
         first?.focus();
+    }
+}
+
+function renderModelBrowser() {
+    const categoryNode = el('is-model-categories');
+    const browserNode = el('is-model-browser');
+    const statusNode = el('is-model-status');
+    if (!categoryNode || !browserNode) return;
+    const models = ui.editorModels || [];
+    const counts = categoryCounts(models);
+    const categories = [
+        { id: 'all', label: '全部', count: models.length },
+        ...MODEL_CATEGORIES.filter(item => counts[item.id] > 0).map(item => ({ ...item, count: counts[item.id] })),
+    ];
+    if (!models.length) {
+        categoryNode.innerHTML = '';
+        browserNode.innerHTML = '<div class="is-hint">还没有模型列表。点“获取模型”自动拉取并分类，或直接手填模型名。</div>';
+        if (statusNode) statusNode.textContent = '尚未获取模型列表';
+        return;
+    }
+    if (ui.modelCategory !== 'all' && counts[ui.modelCategory] === 0) ui.modelCategory = 'all';
+    categoryNode.innerHTML = categories.map(item => `<button type="button" class="is-chip ${item.id === ui.modelCategory ? 'active' : ''}" data-model-category="${escapeHtml(item.id)}">${escapeHtml(item.label)}<span class="is-chip-count">${item.count}</span></button>`).join('');
+    const filtered = filterModels(models, { category: ui.modelCategory, query: ui.modelQuery });
+    const selected = valueOf('is-profile-model');
+    browserNode.innerHTML = filtered.length
+        ? filtered.slice(0, 300).map(item => `<button type="button" class="is-model-row ${item.id === selected ? 'is-selected' : ''}" data-model-select="${escapeHtml(item.id)}"><span class="is-model-id">${escapeHtml(item.id)}</span><span class="is-badge">${escapeHtml(item.label)}</span></button>`).join('')
+        : '<div class="is-hint">当前筛选没有匹配的模型。</div>';
+    if (statusNode) {
+        const fetched = ui.editing?.modelsFetchedAt
+            ? ` · ${new Date(ui.editing.modelsFetchedAt).toLocaleTimeString()}`
+            : '';
+        statusNode.textContent = `${models.length} 个模型 · ${modelSummary(models)}${fetched}`;
+    }
+}
+
+async function fetchEditorModels({ silent = false, force = false } = {}) {
+    if (ui.modelsFetching || !ui.editing) return;
+    let profile;
+    try {
+        profile = readEditorProfile();
+    } catch (error) {
+        setText('is-model-status', error.message || String(error));
+        if (!silent) toast('error', error.message || String(error));
+        return;
+    }
+    if (profile.type === 'custom') {
+        setText('is-model-status', '自定义接口不支持自动获取模型，请手填模型名');
+        return;
+    }
+    if (!force && ui.editorModels.length && Date.now() - Number(ui.editing.modelsFetchedAt || 0) < 10 * 60_000) {
+        renderModelBrowser();
+        return;
+    }
+    ui.modelsFetching = true;
+    setText('is-model-status', '正在获取模型列表…');
+    try {
+        const models = await fetchProfileModels(profile);
+        ui.editorModels = normalizeModels([...(models || []), valueOf('is-profile-model')]);
+        ui.editing.modelsFetchedAt = Date.now();
+        const preferred = filterModels(ui.editorModels, { category: ui.editing.kind === 'chat' ? 'language' : 'image' });
+        if (!valueOf('is-profile-model') || !ui.editorModels.includes(valueOf('is-profile-model'))) {
+            const next = preferred[0]?.id || ui.editorModels[0] || '';
+            if (next) setValue('is-profile-model', next);
+        }
+        fillModelDatalist(ui.editorModels);
+        renderModelBrowser();
+        setText('is-model-status', `已获取 ${ui.editorModels.length} 个模型 · ${modelSummary(ui.editorModels)}`);
+        if (!silent) toast('success', `已获取 ${ui.editorModels.length} 个模型`);
+    } catch (error) {
+        setText('is-model-status', `获取失败：${error.message || error}`);
+        if (!silent) toast('error', `获取模型失败：${truncate(error.message || error, 350)}`);
+    } finally {
+        ui.modelsFetching = false;
+    }
+}
+
+async function refreshProfileModels(id, kind, { silent = true } = {}) {
+    const profile = getProfiles(kind).find(item => item.id === id);
+    if (!profile || profile.type === 'custom') return;
+    try {
+        const models = await fetchProfileModels(profile);
+        profile.models = normalizeModels(models);
+        profile.modelsFetchedAt = Date.now();
+        profile.modelsError = '';
+        save();
+        renderApi();
+        renderCloudProfiles();
+        if (!silent) toast('success', `模型列表已更新：${profile.models.length} 个`);
+    } catch (error) {
+        profile.modelsError = String(error.message || error);
+        save();
+        if (!silent) toast('error', `获取模型失败：${truncate(error.message || error, 350)}`);
     }
 }
 
@@ -1030,6 +1179,9 @@ function readEditorProfile() {
         baseUrl: String(valueOf('is-profile-base') || '').trim(),
         apiKey: String(valueOf('is-profile-key') || ''),
         model: String(valueOf('is-profile-model') || '').trim(),
+        models: normalizeModels(ui.editorModels),
+        modelsFetchedAt: Number(ui.editing?.modelsFetchedAt || 0),
+        modelsError: '',
         headers: JSON.stringify(headers, null, 2),
         extraBody: JSON.stringify(extraBody, null, 2),
         balancePreset: valueOf('is-profile-balance') || 'auto',
@@ -1068,6 +1220,7 @@ function saveProfileEditor() {
         if (profile.kind === 'chat' && !settings.prompt.rewriteProfileId) {
             settings.prompt.rewriteProfileId = profile.id;
         }
+        const shouldFetchModels = !profile.models.length && canAutoFetchModels(profile);
         save();
         setHidden('is-api-editor', true);
         ui.editing = null;
@@ -1075,6 +1228,9 @@ function saveProfileEditor() {
         renderCloudProfiles();
         syncProviderUI();
         toast('success', 'API 已保存');
+        if (shouldFetchModels) {
+            setTimeout(() => refreshProfileModels(profile.id, profile.kind, { silent: false }), 150);
+        }
     } catch (error) {
         setText('is-profile-status', error.message || String(error));
         toast('error', error.message || String(error));
@@ -1082,33 +1238,13 @@ function saveProfileEditor() {
 }
 
 async function testEditorProfile() {
-    try {
-        const profile = readEditorProfile();
-        setText('is-profile-status', '测试中…');
-        if (profile.kind === 'image' && profile.type === 'custom') {
-            setText('is-profile-status', '自定义接口没有统一的连接检测，请直接生成一张测试图');
-            return;
-        }
-        if (profile.kind === 'chat') {
-            const models = await testChatProfile(profile);
-            setText('is-profile-status', `连接成功，发现 ${models.length} 个模型`);
-            fillModelDatalist(models);
-        } else {
-            const result = await testImageProfile(profile);
-            fillModelDatalist(result.imageModels.length ? result.imageModels : result.models);
-            setText('is-profile-status', `连接成功，发现 ${result.models.length} 个模型${result.imageModels.length ? `（${result.imageModels.length} 个生图）` : ''}`);
-            if (!valueOf('is-profile-model') && result.imageModels[0]) setValue('is-profile-model', result.imageModels[0]);
-        }
-        toast('success', 'API 连接成功');
-    } catch (error) {
-        setText('is-profile-status', `失败：${error.message || error}`);
-    }
+    await fetchEditorModels({ silent: false, force: true });
 }
 
-function fillModelDatalist(models) {
-    const datalist = el('is-model-list');
+function fillModelDatalist(models, targetId = 'is-model-list') {
+    const datalist = el(targetId);
     if (!datalist) return;
-    datalist.innerHTML = (models || []).slice(0, 100).map(model => `<option value="${escapeHtml(model)}"></option>`).join('');
+    datalist.innerHTML = normalizeModels(models).slice(0, 500).map(model => `<option value="${escapeHtml(model)}"></option>`).join('');
 }
 
 async function testProfileById(id, kind) {
@@ -1120,16 +1256,19 @@ async function testProfileById(id, kind) {
             return;
         }
         toast('info', '测试中…');
-        if (kind === 'chat') {
-            const models = await testChatProfile(profile);
-            fillModelDatalist(models);
-            toast('success', `连接成功，发现 ${models.length} 个模型`);
-        } else {
-            const result = await testImageProfile(profile);
-            fillModelDatalist(result.imageModels.length ? result.imageModels : result.models);
-            toast('success', `连接成功，发现 ${result.models.length} 个模型${result.imageModels.length ? `（${result.imageModels.length} 个生图）` : ''}`);
-        }
+        const models = await fetchProfileModels(profile);
+        profile.models = normalizeModels(models);
+        profile.modelsFetchedAt = Date.now();
+        profile.modelsError = '';
+        upsertProfile(kind, profile);
+        save();
+        fillModelDatalist(profile.models);
+        renderApi();
+        renderCloudProfiles();
+        toast('success', `连接成功，发现 ${profile.models.length} 个模型 · ${modelSummary(profile.models)}`);
     } catch (error) {
+        profile.modelsError = String(error.message || error);
+        save();
         toast('error', `测试失败：${truncate(error.message || error, 400)}`);
     }
 }
@@ -1347,6 +1486,105 @@ async function runRewrite() {
     }
 }
 
+function renderScanResults() {
+    const node = el('is-scan-results');
+    if (!node) return;
+    if (!ui.scanResults.length) {
+        node.innerHTML = '';
+        return;
+    }
+    node.innerHTML = ui.scanResults.map(item => `<div class="is-scan-result"><span class="is-scan-address">${escapeHtml(item.host)}:${item.port}</span><span class="is-grow">${escapeHtml(item.comfyVersion || 'ComfyUI')} · ${escapeHtml(item.deviceName || '')}</span><button type="button" class="is-link" data-scan-url="${escapeHtml(item.url)}">使用</button></div>`).join('');
+}
+
+async function scanForComfy() {
+    if (ui.scanAbort) {
+        ui.scanAbort.abort();
+        ui.scanAbort = null;
+        setText('is-scan-progress', '已停止扫描');
+        const button = el('is-scan-comfy');
+        if (button) button.textContent = '扫描局域网';
+        return;
+    }
+    if (get().useServerProxy === false) {
+        setText('is-scan-progress', '扫描依赖酒馆跨域代理，请先在高级参数打开“通过酒馆服务端代理请求”。');
+        return;
+    }
+    saveComfyFields();
+    let prefix = valueOf('is-scan-prefix');
+    if (!prefix) prefix = prefixFromUrl(get().comfy.url);
+    if (!prefix) {
+        setText('is-scan-progress', '正在探测手机所在网段…');
+        prefix = await detectLocalSubnet();
+    }
+    if (!prefix) {
+        setText('is-scan-progress', '没能自动识别网段，请在“扫描前缀”里填前三段，例如 192.168.1。');
+        return;
+    }
+    try {
+        prefix = normalizeScanPrefix(prefix);
+    } catch (error) {
+        setText('is-scan-progress', error.message || String(error));
+        return;
+    }
+    const port = Number(valueOf('is-scan-port')) || portFromUrl(get().comfy.url);
+    setValue('is-scan-prefix', prefix);
+    const settings = get();
+    settings.comfy.scanPrefix = prefix;
+    settings.comfy.scanPort = port;
+    saveSoon();
+    const controller = new AbortController();
+    ui.scanAbort = controller;
+    ui.scanResults = [];
+    renderScanResults();
+    const button = el('is-scan-comfy');
+    if (button) button.textContent = '停止扫描';
+    setText('is-scan-progress', `扫描 ${prefix}.1-254 的 ${port} 端口…`);
+    try {
+        const found = await scanComfy({
+            prefix,
+            port,
+            priority: [get().comfy.url].filter(Boolean),
+            concurrency: 8,
+            timeout: 650,
+            signal: controller.signal,
+            onProgress: (done, total, count) => {
+                setText('is-scan-progress', `扫描中 ${done}/${total} · 已发现 ${count}`);
+            },
+        });
+        if (controller.signal.aborted) {
+            setText('is-scan-progress', '已停止扫描');
+            return;
+        }
+        ui.scanResults = found;
+        renderScanResults();
+        setText('is-scan-progress', found.length
+            ? `扫描完成 · 找到 ${found.length} 个 ComfyUI，点“使用”连接`
+            : '没有找到 ComfyUI。确认电脑已监听 0.0.0.0、8188 端口放行防火墙、手机和电脑在同一 Wi-Fi，且酒馆“启用 CORS 代理”已打开。');
+        if (found.length) toast('success', `发现 ${found.length} 个 ComfyUI`);
+        else toast('warning', '本网段没有发现 ComfyUI');
+    } catch (error) {
+        setText('is-scan-progress', `扫描失败：${error.message || error}`);
+    } finally {
+        ui.scanAbort = null;
+        const btn = el('is-scan-comfy');
+        if (btn) btn.textContent = '扫描局域网';
+    }
+}
+
+async function useScanResult(url) {
+    setValue('is-comfy-url', url);
+    get().comfy.url = url;
+    const prefix = prefixFromUrl(url);
+    if (prefix) {
+        setValue('is-scan-prefix', prefix);
+        get().comfy.scanPrefix = prefix;
+    }
+    setValue('is-scan-port', portFromUrl(url));
+    get().comfy.scanPort = portFromUrl(url);
+    saveSoon();
+    await testComfyWithModels();
+}
+
 function bindEvents() {
     document.addEventListener('click', event => {
         const target = event.target;
@@ -1391,7 +1629,38 @@ function bindEvents() {
             return;
         }
         if (target.closest('#is-quick-test')) {
+            if (!valueOf('is-comfy-url')) {
+                switchTab('monitor');
+                toast('info', '先填 ComfyUI 地址，或点“扫描局域网”');
+                el('is-comfy-url')?.focus();
+                return;
+            }
             testComfyWithModels();
+            return;
+        }
+        if (target.closest('#is-fetch-models')) {
+            fetchEditorModels({ silent: false, force: true });
+            return;
+        }
+        const modelCategory = target.closest('[data-model-category]');
+        if (modelCategory) {
+            ui.modelCategory = modelCategory.dataset.modelCategory;
+            renderModelBrowser();
+            return;
+        }
+        const modelSelect = target.closest('[data-model-select]');
+        if (modelSelect) {
+            setValue('is-profile-model', modelSelect.dataset.modelSelect);
+            renderModelBrowser();
+            return;
+        }
+        if (target.closest('#is-scan-comfy')) {
+            scanForComfy();
+            return;
+        }
+        const scanResult = target.closest('[data-scan-url]');
+        if (scanResult) {
+            useScanResult(scanResult.dataset.scanUrl);
             return;
         }
         if (target.closest('#is-refresh-models')) {
@@ -1728,6 +1997,10 @@ function bindEvents() {
                 break;
             case 'is-rewrite-intent':
                 break;
+            case 'is-model-search':
+                ui.modelQuery = target.value;
+                renderModelBrowser();
+                break;
             case 'is-profile-name':
             case 'is-profile-base':
             case 'is-profile-key':
@@ -1849,6 +2122,9 @@ function bindEvents() {
                 break;
             case 'is-profile-type':
                 syncEditorVisibility();
+                ui.editorModels = [];
+                ui.modelCategory = ui.editing?.kind === 'chat' ? 'language' : 'image';
+                renderModelBrowser();
                 if (ui.editing?.isNew) {
                     const list = ui.editing.kind === 'chat' ? CHAT_TYPES : CLOUD_IMAGE_TYPES;
                     const meta = list.find(item => item.id === target.value);

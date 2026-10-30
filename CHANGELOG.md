@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-10-30
+
+- API 档案支持自动获取模型列表，并按语言 / 图像 / 视频 / 音频 / 嵌入分类、搜索和选择。
+- 新增 Android 端局域网扫描 ComfyUI：可从上次地址或手机网段探测 8188 端口，支持停止和直接使用结果。
+- ComfyUI 连接改为“一键连接”，成功后自动缓存模型并记住扫描前缀/端口。
+
 ## 0.1.1 — 2026-10-30
 
 - Privacy pass: removed the author's LAN IP and specific GPU model from documentation; examples are now generic.

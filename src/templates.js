@@ -35,7 +35,7 @@ export function panelTemplate() {
       <div id="is-comfy-brief" class="is-brief">
         <span id="is-brief-dot" class="is-dot"></span>
         <span id="is-brief-text" class="is-grow">ComfyUI 未配置</span>
-        <button type="button" class="is-link" id="is-quick-test">检测</button>
+        <button type="button" class="is-link" id="is-quick-test">一键连接</button>
       </div>
 
       <div id="is-cloud-bar" class="is-field" hidden>
@@ -123,7 +123,9 @@ export function panelTemplate() {
 
       <div class="is-field" id="is-cloud-model-wrap" hidden>
         <label for="is-cloud-model">模型名</label>
-        <input id="is-cloud-model" class="text_pole" type="text" placeholder="gpt-image-1 / gemini-2.5-flash-image" />
+        <input id="is-cloud-model" class="text_pole" type="text" list="is-cloud-model-list" placeholder="gpt-image-1 / gemini-2.5-flash-image" />
+        <datalist id="is-cloud-model-list"></datalist>
+        <div id="is-cloud-model-hint" class="is-hint"></div>
       </div>
 
       <details class="is-advanced" id="is-advanced">
@@ -243,9 +245,20 @@ export function panelTemplate() {
           </label>
         </div>
         <div class="is-inline-actions">
-          <button type="button" class="menu_button" id="is-test-comfy">检测并读取模型</button>
+          <button type="button" class="menu_button" id="is-test-comfy">一键连接</button>
+          <button type="button" class="menu_button" id="is-scan-comfy">扫描局域网</button>
           <button type="button" class="menu_button" id="is-save-comfy">保存</button>
         </div>
+        <div class="is-grid is-grid-2 is-scan-settings">
+          <label>扫描前缀
+            <input id="is-scan-prefix" class="text_pole" type="text" placeholder="192.168.1" />
+          </label>
+          <label>扫描端口
+            <input id="is-scan-port" class="text_pole" type="number" min="1" max="65535" value="8188" />
+          </label>
+        </div>
+        <div id="is-scan-progress" class="is-hint"></div>
+        <div id="is-scan-results" class="is-scan-results"></div>
         <div id="is-comfy-status" class="is-hint"></div>
       </div>
 
@@ -319,7 +332,22 @@ export function panelTemplate() {
         <div class="is-field"><label>类型</label><select id="is-profile-type" class="text_pole"></select><div id="is-profile-type-hint" class="is-hint"></div></div>
         <div class="is-field"><label>Base URL</label><input id="is-profile-base" class="text_pole" type="text" placeholder="https://..." /></div>
         <div class="is-field"><label>API Key</label><input id="is-profile-key" class="text_pole" type="password" autocomplete="off" /></div>
-        <div class="is-field"><label>默认模型</label><input id="is-profile-model" class="text_pole" type="text" list="is-model-list" /><datalist id="is-model-list"></datalist></div>
+        <div class="is-field">
+          <div class="is-field-head">
+            <label>默认模型</label>
+            <div class="is-inline-actions">
+              <button type="button" class="is-link" id="is-fetch-models">获取模型</button>
+            </div>
+          </div>
+          <input id="is-profile-model" class="text_pole" type="text" list="is-model-list" />
+          <datalist id="is-model-list"></datalist>
+          <div id="is-model-status" class="is-hint"></div>
+          <div id="is-model-browser-wrap" class="is-model-browser-wrap">
+            <div id="is-model-categories" class="is-chip-row"></div>
+            <input id="is-model-search" class="text_pole" type="text" placeholder="筛选模型…" />
+            <div id="is-model-browser" class="is-model-browser"></div>
+          </div>
+        </div>
 
         <div id="is-custom-fields" class="is-subbox" hidden>
           <div class="is-subbox-title">自定义请求</div>
