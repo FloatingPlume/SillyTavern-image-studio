@@ -4,6 +4,9 @@
 
 SillyTavern 1.18+ 的图像生成与 API 管理扩展。一个面板里同时管理本地 ComfyUI、云端生图 API、聊天 API、余额和生成记录。
 
+> **状态：个人自用 beta，AI 辅助开发。**
+> 本项目的需求、代码和测试脚本由作者与 AI 协作完成，作者负责在真实 SillyTavern / ComfyUI 环境验证与维护。它不是生产级商业插件，不承诺所有云端上游都一次适配成功；欢迎 issue 和 PR，但不保证即时响应。如果你所在社区禁止 AI 辅助内容，请不要在该社区发布或推荐本项目。
+
 ## 功能
 
 - **本地 ComfyUI**：局域网连接 PC，实时显示 GPU / 显存 / 内存 / ComfyUI 版本、队列、WebSocket 进度、节点状态和实时预览帧。
@@ -36,7 +39,7 @@ https://github.com/FloatingPlume/SillyTavern-image-studio
 在 SillyDroid 的设置里：
 
 1. 打开 **让服务端充当跨域代理**。
-2. 如果同时开启了 **私网地址白名单**，把电脑的局域网 IP（例如 `192.168.3.5`）或 `192.168.0.0/16` 加入允许列表。
+2. 如果同时开启了 **私网地址白名单**，把电脑的局域网 IP（例如 `192.168.1.10`）或 `192.168.0.0/16` 加入允许列表。
 3. 保存并重启酒馆服务。
 
 如果代理不可用，PC / 队列页会显示 403 提示；这时也可以在画坊高级参数里关闭“通过酒馆服务端代理请求”，改为浏览器直连（需要目标允许 CORS）。
@@ -74,7 +77,7 @@ SillyTavern/data/<用户名>/extensions/third-party/image-studio
 PC / 队列 → 地址填电脑的局域网 IP：
 
 ```text
-http://192.168.3.5:8188
+http://192.168.1.10:8188
 ```
 
 点 **检测并读取模型**。成功后 Checkpoint 下拉会出现模型列表。
@@ -192,6 +195,7 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 - API Key 存在酒馆的扩展设置（`settings.json`）里，和酒馆其他 API Key 同级；不要公开分享 `settings.json`。
 - 画坊没有遥测、上传或第三方统计。请求只发往你配置的 ComfyUI / API 地址。
 - 云端接口的请求会经过酒馆服务端 `/proxy/`；酒馆会剥离 Cookie、Origin 等头，但会转发 Authorization。
+- 安全报告方式和密钥注意事项见 [SECURITY.md](SECURITY.md)。
 
 ## 已知限制
 
@@ -204,7 +208,8 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 ## 开发与验证
 
 - 目标环境：SillyTavern 1.18.0，SillyDroid Android 宿主。
-- 已在 ST 1.18 + 本地真实 ComfyUI 0.43.2（RTX 4050 Laptop）上验证连接、模型读取、出图、保存；并用模拟服务覆盖 WebSocket 进度、预览帧、队列、取消、云端 OpenAI / Gemini / Imagen / 自定义接口、余额和聊天切换。
+- 已在 ST 1.18 + 本地真实 ComfyUI 0.43.2（NVIDIA 6 GB 级移动显卡）上验证连接、模型读取、出图、保存；并用模拟服务覆盖 WebSocket 进度、预览帧、队列、取消、云端 OpenAI / Gemini / Imagen / 自定义接口、余额和聊天切换。
+- 纯逻辑模块有 Node 测试；本地运行 `npm run check && npm test`，GitHub Actions 也会执行同样的检查。涉及真实浏览器/酒馆 UI 的交互仍需人工验收。
 - 无构建步骤，原生 ES Module + CSS；文件结构：
 
 ```text
@@ -226,4 +231,4 @@ src/
 
 ## License
 
-MIT
+本扩展自身代码以 MIT 发布。SillyTavern 本体为 AGPL-3.0；本项目只在运行时调用其公开前端模块，不包含 SillyTavern 源码。

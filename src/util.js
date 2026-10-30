@@ -50,22 +50,6 @@ export function formatBytes(bytes) {
     return `${value.toFixed(value >= 100 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-export function formatDuration(ms) {
-    const seconds = Math.max(0, Math.round(Number(ms) / 1000));
-    if (seconds < 60) return `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
-}
-
-export function timeAgo(timestamp) {
-    const diff = Date.now() - Number(timestamp || 0);
-    if (!Number.isFinite(diff) || diff < 0) return '';
-    if (diff < 60_000) return '刚刚';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-    return new Date(timestamp).toLocaleDateString();
-}
-
 export function truncate(text, length = 120) {
     const value = String(text ?? '').replace(/\s+/g, ' ').trim();
     return value.length > length ? `${value.slice(0, length - 1)}…` : value;
@@ -119,19 +103,6 @@ export function getByPath(object, path) {
         current = current[segment];
     }
     return current;
-}
-
-export function setByPath(object, path, value) {
-    const segments = String(path).replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
-    let current = object;
-    for (let index = 0; index < segments.length - 1; index += 1) {
-        const segment = segments[index];
-        if (typeof current[segment] !== 'object' || current[segment] == null) {
-            current[segment] = {};
-        }
-        current = current[segment];
-    }
-    current[segments[segments.length - 1]] = value;
 }
 
 export function pickNumber(...values) {
@@ -267,18 +238,4 @@ export function deepMerge(target, source) {
         }
     }
     return output;
-}
-
-export function waitFor(predicate, timeout = 5000, interval = 100) {
-    return new Promise((resolve, reject) => {
-        const started = Date.now();
-        const tick = () => {
-            try {
-                if (predicate()) return resolve(true);
-            } catch { /* ignore */ }
-            if (Date.now() - started >= timeout) return reject(new Error('等待超时'));
-            setTimeout(tick, interval);
-        };
-        tick();
-    });
 }

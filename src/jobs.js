@@ -2,8 +2,8 @@ import { ComfyService } from './comfy.js';
 import { generateCloudImages, parseExtraBody } from './providers.js';
 import { buildCustomWorkflow, buildSimpleWorkflow, summarizeWorkflow } from './workflow.js';
 import { addHistory, get, getActiveImageProfile, saveSoon } from './store.js';
-import { imageUrl, saveBlobToST } from './history.js';
-import { clamp, parseJsonLoose, toast, truncate, uid } from './util.js';
+import { saveBlobToST } from './history.js';
+import { clamp, toast, truncate, uid } from './util.js';
 
 const NODE_LABELS = {
     CheckpointLoaderSimple: '加载模型',
@@ -556,18 +556,4 @@ export function describeRequest() {
         workflowJson: details.workflow ? JSON.stringify(details.workflow, null, 2) : '',
         promptExcerpt: truncate(details.positive, 300),
     };
-}
-
-export function resultImageUrl(result) {
-    if (result?.path) return imageUrl(result.path);
-    if (result?.blob) return URL.createObjectURL(result.blob);
-    return '';
-}
-
-export function hasJobDetails() {
-    return !!job.details;
-}
-
-export function parseWorkflowPreview(text) {
-    return parseJsonLoose(text);
 }

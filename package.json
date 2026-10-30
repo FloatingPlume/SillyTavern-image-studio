@@ -1,0 +1,15 @@
+{
+    "name": "sillytavern-image-studio",
+    "version": "0.1.1",
+    "private": true,
+    "type": "module",
+    "description": "画坊 Image Studio — SillyTavern 1.18 image generation and API manager extension",
+    "scripts": {
+        "test": "node scripts/test.mjs",
+        "check": "node scripts/check.mjs"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "license": "MIT"
+}

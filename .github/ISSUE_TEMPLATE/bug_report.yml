@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a reproducible problem with Image Studio
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please remove API keys, tokens and personal IPs from logs/screenshots before submitting.
+  - type: input
+    id: st-version
+    attributes:
+      label: SillyTavern version
+      placeholder: "e.g. 1.18.0"
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: SillyDroid / browser
+      placeholder: "e.g. SillyDroid 1.0.1.64 +tavern.1.18.0, or Chrome 140"
+    validations:
+      required: true
+  - type: input
+    id: comfy-version
+    attributes:
+      label: ComfyUI version
+      placeholder: "e.g. 0.43.2 / not used"
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Where did it fail?
+      options:
+        - Local ComfyUI
+        - OpenAI-compatible image API
+        - OpenAI official
+        - Gemini / Imagen
+        - xAI
+        - Custom image API
+        - Chat API / rewrite
+        - Balance query
+        - UI / installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the page/tab, buttons clicked, and whether the server proxy was enabled.
+      placeholder: |
+        1. Open 画坊 → ...
+        2. Click ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error text
+      description: Browser console, SillyDroid logs, or ComfyUI log tail. Remove secrets and personal IPs.
+      render: text
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I read README and checked the ComfyUI LAN/firewall/proxy notes
+          required: true
+        - label: I removed API keys, tokens and personal IPs from this report
+          required: true

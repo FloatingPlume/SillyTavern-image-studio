@@ -2,7 +2,6 @@ import {
     BALANCE_PRESETS,
     CHAT_TYPES,
     CLOUD_IMAGE_TYPES,
-    PROMPT_STYLES,
     SIZE_PRESETS,
 } from './constants.js';
 import {
@@ -28,15 +27,13 @@ import {
     ctx,
     escapeHtml,
     formatBytes,
-    formatDuration,
     imagePathToUrl,
     parseJsonLoose,
-    timeAgo,
     toast,
     truncate,
 } from './util.js';
 import { ComfyService } from './comfy.js';
-import { defaultImageProfile, imageTypeMeta, testImageProfile } from './providers.js';
+import { defaultImageProfile, testImageProfile } from './providers.js';
 import { queryBalance, formatBalance, balanceDetails } from './balance.js';
 import {
     applyChatProfile,

@@ -1,7 +1,7 @@
 import { CHAT_TYPES } from './constants.js';
 import { chatEndpoint, parseExtraBody, parseHeaders, v1Base } from './providers.js';
 import { makeAuthHeaders, request } from './net.js';
-import { ctx, parseJsonLoose } from './util.js';
+import { ctx } from './util.js';
 
 const SECRET_KEYS = {
     openai: 'api_key_openai',
@@ -346,8 +346,4 @@ export async function rewriteWithCurrentApi(messages, maxTokens = 700) {
         responseLength: maxTokens,
         quietToLoud: false,
     });
-}
-
-export function parseChatJson(text) {
-    return parseJsonLoose(text);
 }

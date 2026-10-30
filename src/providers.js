@@ -415,11 +415,3 @@ export function defaultImageProfile(type = 'openai-compatible') {
     };
 }
 
-export function imageTypeMeta(type) {
-    return CLOUD_IMAGE_TYPES.find(item => item.id === type) || CLOUD_IMAGE_TYPES[0];
-}
-
-export function parseAspectRatio(value, width, height) {
-    if (value && /^\d+:\d+$/.test(value)) return value;
-    return sizeToAspect(width, height);
-}

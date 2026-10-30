@@ -132,9 +132,3 @@ export const BALANCE_PRESETS = [
     { id: 'none', label: '不查询', hint: '该上游没有余额接口' },
 ];
 
-export const DEFAULT_LORA = { name: '', strengthModel: 0.8, strengthClip: 0.8 };
-
-export const PROMPT_STYLES = [
-    { id: 'tags', label: '标签风（SD / Danbooru）' },
-    { id: 'natural', label: '自然语言（Gemini / GPT Image）' },
-];

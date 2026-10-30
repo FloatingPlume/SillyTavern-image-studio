@@ -6,7 +6,7 @@ import {
     HISTORY_LIMIT,
     SETTINGS_KEY,
 } from './constants.js';
-import { clone, ctx, deepMerge, toast, uid } from './util.js';
+import { ctx, deepMerge, uid } from './util.js';
 
 function defaultSettings() {
     return {
@@ -178,10 +178,6 @@ export function getProfiles(kind) {
     return kind === 'chat' ? settings.chatProfiles : settings.imageProfiles;
 }
 
-export function findProfile(kind, id) {
-    return getProfiles(kind).find(profile => profile.id === id) || null;
-}
-
 export function upsertProfile(kind, profile) {
     const settings = get();
     const list = kind === 'chat' ? settings.chatProfiles : settings.imageProfiles;
@@ -210,11 +206,6 @@ export function removeProfile(kind, id) {
 export function getActiveImageProfile() {
     const settings = get();
     return settings.imageProfiles.find(profile => profile.id === settings.cloud.profileId) || null;
-}
-
-export function getActiveChatProfile() {
-    const settings = get();
-    return settings.chatProfiles.find(profile => profile.id === settings.prompt.rewriteProfileId) || null;
 }
 
 export function addHistory(entry) {
@@ -256,23 +247,4 @@ export function setBalanceCache(profileId, value) {
 export function isBalanceFresh(profileId) {
     const cache = getBalanceCache(profileId);
     return !!cache && Date.now() - Number(cache.at || 0) < BALANCE_TTL;
-}
-
-export function resetForTests() {
-    if (store.settings) {
-        const context = ctx();
-        if (context) context.extensionSettings[SETTINGS_KEY] = clone(defaultSettings());
-        store.settings = context?.extensionSettings?.[SETTINGS_KEY] || null;
-    }
-}
-
-export function importSettings(raw) {
-    const context = ctx();
-    if (!context) return false;
-    const merged = deepMerge(defaultSettings(), raw || {});
-    context.extensionSettings[SETTINGS_KEY] = merged;
-    store.settings = merged;
-    save();
-    toast('success', '画坊设置已导入');
-    return true;
 }
