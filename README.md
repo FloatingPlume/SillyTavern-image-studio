@@ -11,15 +11,16 @@ SillyTavern 1.18+ 的图像生成与 API 管理扩展。一个面板里同时管
 
 - **本地 ComfyUI**：记住上次地址并自动检测；支持从手机扫描局域网发现 ComfyUI；实时显示 GPU / 显存 / 内存 / ComfyUI 版本、队列、WebSocket 进度、节点状态和实时预览帧。
 - **透明请求**：生成前可展开查看实际发送的正/负面提示词、seed、尺寸、采样器、最终 API 工作流 JSON。
-- **内置工作流**：Checkpoint / Sampler / Scheduler / VAE / LoRA / 高清修复（潜空间放大再采样）/ 批量。
-- **自定义工作流**：粘贴 ComfyUI 导出的 API 格式 JSON；支持占位符，或自动识别 Checkpoint、KSampler、CLIPTextEncode、EmptyLatentImage、SaveImage 节点。
+- **内置工作流**：Checkpoint / Sampler / Scheduler / VAE / LoRA / 高清修复（潜空间放大再采样）/ 批量；有参考图时自动切换核心图生图。
+- **自定义工作流**：粘贴 ComfyUI 导出的 API 格式 JSON；支持 `%reference%` 参考图占位符，或自动识别 Checkpoint、KSampler、CLIPTextEncode、LoadImage、EmptyLatentImage、SaveImage 节点。附带 IPAdapter Plus 模板（需自备模型）。
 - **云端生图**：OpenAI 兼容中转、OpenAI 官方、Google Gemini / Imagen、xAI，以及可自由填写 URL / 请求体 / 返回路径的自定义接口。
 - **API 管理**：多套生图与聊天档案、连接测试、自动获取模型列表、按语言 / 图像 / 视频 / 语音 / 嵌入分类筛选、Key 管理、余额查询（上游支持时）。
 - **插件内部模型**：场景提取、角色挑选、角色库扫描和提示词改写可以走一条独立链路，跟随酒馆当前 API、使用画坊聊天档案，或使用酒馆连接配置；不会切换聊天 API，可单独选便宜模型并限制上下文消息数。
 - **聊天 API 切换**：一键把聊天档案应用到酒馆（OpenAI 兼容 / OpenAI / Gemini / Claude / OpenRouter / xAI），自动写入酒馆密钥并切换模型。
 - **提示词**：手写 + 宏；可选 AI 改写（默认关闭，点一次才发一次请求），支持“酒馆当前预设 / 画坊内置 / 自定义系统提示词”三种来源。
 - **消息级生图**：每条角色消息的操作栏都有“画坊”按钮；可针对任意一条消息单独抽取场景并后台生成，结果显示为消息下方的小缩略图，点击放大。
-- **角色库**：角色卡和用户设定完整扫描；世界书默认只扫当前对话已激活的条目，再由插件内部模型提炼外貌/服装，勾选确认后保存在当前角色卡。生成前用 AI 选取出场角色，弹出二次确认页。
+- **角色库**：角色卡和用户设定完整扫描；世界书默认只扫当前对话已激活的条目，再由插件内部模型提炼外貌/服装，勾选确认后保存在当前角色卡。支持 AI 把角色资料转成生图提示词、用所选角色一键确认生图，并把参考图用于本地图生图或支持的云端接口。
+- **参考图**：本地 ComfyUI 自动走核心 img2img；自定义工作流支持 `%reference%`；Gemini 图像接口使用 inlineData；OpenAI 编辑接口需浏览器直连且接口允许 CORS。
 - **像素黑猫悬浮窗**：可拖动、显示后台进度和最近生成缩略图，点击打开画坊；右侧原面板保留。
 - **生成记录**：自动保存到酒馆图库 `image-studio` 目录；支持下载、设为聊天背景、插入聊天、复用参数。
 - **移动端**：面板适配窄屏，按钮和操作行会自动换行，不会把中文按钮压成逐字竖排；使用酒馆原生主题变量，无额外前端框架。
@@ -202,9 +203,11 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 - **AI 扫描（默认）**：角色卡和用户设定每次读取全部字段（超长字段会截断）；世界书默认只取**当前对话已经被酒馆激活**的条目（沿用酒馆自己的关键词、递归、预算和向量规则），再交给插件内部模型提炼 `name / aliases / appearance / outfit / notes`。模型会跳过地点、组织、物品和事件，只保留能画成角色的条目。
 - **世界书范围**：默认“当前对话激活条目”；切到“整本世界书”会读取当前角色卡与聊天绑定的世界书，最多发送 24 条、约 18000 字符给 AI。更多条目会按外貌/人物特征优先排序，其余在状态里提示未发送。
 - **机械兜底**：AI 不可用或返回格式异常时，自动退回关键词扫描；世界书激活失败时退回整本机械筛选，并在候选里补入机械找到的角色。扫描结果仍然只进入候选列表，必须你勾选后才会写入角色库。
-- 每个角色可编辑名称、别名、外貌、服装、备注和参考图；参考图存进酒馆图库并显示，不会自动传给 ComfyUI。
+- 每个角色可编辑名称、别名、外貌、服装、提示词、备注和参考图；参考图存进酒馆图库并显示。
+- **AI 转提示词**：勾选角色后点“AI 转所选提示词”，插件内部模型会把外貌/服装转成紧凑的标签或自然语言片段，缓存在角色条目里；生成时优先使用转换后的提示词，而不是原始设定长文。也可以手动编辑提示词。
+- **一键角色生图**：勾选角色后点“用所选角色生图”，确认场景（留空则生成角色展示图）即可生成。会用第一个有参考图的选中角色作为图生图参考，并自动带上所有选中角色的提示词。
 - 生成时 AI 会根据对话和角色库选择出场角色；你可以取消勾选或在确认页修改场景。
-- 最终提示词会追加选中角色的外貌/服装文字，提高文字层面的一致性。真正图生图/角色参考图需要你在 ComfyUI 自定义工作流里接入 IPAdapter/InstantID/Redux 等节点；当前版本不假装参考图会自动参与。
+- 参考图的实际使用取决于生成链路：本地 ComfyUI 默认核心图生图（VAEEncode，降噪可调）；自定义工作流需使用 `%reference%` 或让自动绑定识别 `LoadImage`；云端只有 Gemini 图像和部分 OpenAI 编辑接口支持。xAI 和 Imagen 当前不支持参考图。
 
 ### 像素黑猫
 
@@ -245,8 +248,10 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 
 ```text
 %positive% %negative% %seed% %steps% %cfg% %width% %height%
-%batch% %checkpoint% %sampler% %scheduler% %denoise% %scale% %vae%
+%batch% %checkpoint% %sampler% %scheduler% %denoise% %scale% %vae% %reference%
 ```
+
+`%reference%` 会被替换成画坊自动上传到 ComfyUI input 目录的参考图文件名。参考图通过浏览器直接发送到 ComfyUI，不经过酒馆代理；ComfyUI 开了 Basic 认证时无法自动上传。
 
 例如：
 
@@ -264,9 +269,18 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 - KSampler positive / negative 链路指向的 CLIPTextEncode
 - EmptyLatentImage 的 width / height / batch
 - CheckpointLoaderSimple 的 ckpt_name
+- LoadImage 的 image → 参考图
 - SaveImage 的 filename_prefix
 
 复杂工作流（多采样阶段、ControlNet、IPAdapter 等）建议用占位符，避免自动绑定猜错。UI 格式的工作流不适用，必须导出 API 格式。
+
+### 内置 IPAdapter Plus 模板
+
+高级参数 → 工作流选“自定义 API 工作流” → **载入 IPAdapter 模板**。模板使用 `IPAdapterUnifiedLoader` + `IPAdapterAdvanced`，通过 `%reference%` 注入参考图，适合角色面部/服装一致性。
+
+- 需要 ComfyUI 已安装 IPAdapter Plus 节点、CLIP Vision 模型和 IPAdapter 模型；缺少模型时 ComfyUI 会拒绝提交，并显示缺失文件。
+- 默认 preset 是 `PLUS (high strength)`、weight 0.75；可以在工作流 JSON 里调整。
+- 没有参考图时不要用这个模板，`LoadImage` 会拿到空文件名。
 
 ## 数据与隐私
 
@@ -274,12 +288,16 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 - API Key 存在酒馆的扩展设置（`settings.json`）里，和酒馆其他 API Key 同级；不要公开分享 `settings.json`。
 - 画坊没有遥测、上传或第三方统计。请求只发往你配置的 ComfyUI / API 地址。
 - 角色库 AI 扫描会把角色卡字段和筛选后的世界书片段发给“插件内部模型”对应的 API；默认只发当前对话激活的世界书条目，不会整本上传。
-- 云端接口的请求会经过酒馆服务端 `/proxy/`；酒馆会剥离 Cookie、Origin 等头，但会转发 Authorization。
+- 云端接口的请求会经过酒馆服务端 `/proxy/`；酒馆会剥离 Cookie、Origin 等头，但会转发 Authorization。例外：OpenAI 图片编辑使用浏览器直连 multipart，不经过酒馆代理。
+- 参考图用于本地图生图时会直接发送到你配置的 ComfyUI；用于 Gemini 时会作为 base64 inlineData 经过酒馆代理；用于 OpenAI edits 时会直连你配置的 API。
 - 安全报告方式和密钥注意事项见 [SECURITY.md](SECURITY.md)。
 
 ## 已知限制
 
-- 角色一致性目前是**文字外貌 + 参考图素材预览**；参考图不会自动参与 ComfyUI 生图，需要自定义工作流接入图像条件节点。
+- 角色一致性目前是“AI 提示词 + 单张参考图图生图”。一次生成只使用第一个有参考图的选中角色；多角色多参考图条件需要更复杂的 IPAdapter/Regional Prompt 工作流。
+- 本地核心图生图只做整图 VAEEncode，不保证面部身份；需要更强一致性请安装 IPAdapter 模型并使用内置模板。
+- OpenAI 图片编辑走浏览器直连 multipart，需要目标接口允许 CORS；官方 API 通常不允许浏览器跨域，失败时请改用 Gemini 图像或本地 ComfyUI。酒馆服务端代理只转发 JSON，无法转发 multipart。
+- ComfyUI 参考图上传使用隐藏 multipart 表单直连；ComfyUI 开 Basic 认证、手机与 PC 不在同一网络，或被 WebView 拦截时会失败。
 - 角色库 AI 扫描的质量取决于插件内部模型；世界书依赖酒馆的激活规则，若角色条目没有被关键词/递归触发，可切到“整本世界书”手动扫描。AI 输入最多约 18000 字符、24 条世界书来源，超出部分会省略。
 - 云端接口差异很大；OpenAI 兼容路径适配最好，Gemini / Imagen / xAI 已按公开接口实现。
 - 余额接口需要上游开放；部分中转只允许网页登录态查询，API Key 查询会失败。
@@ -291,7 +309,7 @@ Gemini / Claude / OpenAI 官方等固定域名的档案，Base URL 仅用于画�
 ## 开发与验证
 
 - 目标环境：SillyTavern 1.18.0，SillyDroid Android 宿主。
-- 已在 ST 1.18 + 本地真实 ComfyUI 0.43.2（NVIDIA 6 GB 级移动显卡）上验证连接、模型读取、出图、保存；并用模拟服务覆盖 WebSocket 进度、预览帧、队列、取消、云端 OpenAI / Gemini / Imagen / 自定义接口、余额和聊天切换。
+- 已在 ST 1.18 + 本地真实 ComfyUI 0.43.2（NVIDIA 6 GB 级移动显卡）上验证连接、模型读取、文生图、核心图生图提交与出图、参考图隐藏表单上传和保存；并用模拟服务覆盖 WebSocket 进度、预览帧、队列、取消、云端 OpenAI / Gemini / Imagen / 自定义接口、余额和聊天切换。云端参考图以请求构造测试覆盖（Gemini inlineData、OpenAI multipart edits），未使用真实云端 Key 出图。
 - 纯逻辑模块有 Node 测试；本地运行 `npm run check && npm test`，GitHub Actions 也会执行同样的检查。涉及真实浏览器/酒馆 UI 的交互仍需人工验收。
 - 无构建步骤，原生 ES Module + CSS；文件结构：
 
@@ -307,6 +325,7 @@ src/
   library-scan.js       AI 角色设定提炼 prompt 与 JSON 解析
   floating-cat.js       像素黑猫悬浮窗与后台缩略图
   workflow.js   工作流生成与自定义绑定
+  workflows/    内置 IPAdapter 工作流模板
   providers.js  云端生图适配
   balance.js    余额查询
   chat.js       聊天 API / 提示词改写

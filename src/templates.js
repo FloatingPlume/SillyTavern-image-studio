@@ -94,6 +94,12 @@ export function panelTemplate() {
         <div id="is-rewrite-status" class="is-hint"></div>
       </div>
 
+      <div id="is-reference-bar" class="is-brief is-reference-bar" hidden>
+        <img id="is-reference-thumb" alt="参考图" />
+        <span id="is-reference-label" class="is-grow">参考图</span>
+        <button type="button" class="is-link" id="is-reference-clear">清除</button>
+      </div>
+
       <details class="is-negative-wrap">
         <summary>负面提示词</summary>
         <textarea id="is-negative" class="text_pole is-textarea" rows="2" placeholder="lowres, bad anatomy..."></textarea>
@@ -172,9 +178,19 @@ export function panelTemplate() {
           </div>
 
           <div class="is-field">
+            <label>图生图降噪 <span class="is-hint">0.35 更贴近参考图 · 0.55 平衡 · 0.75 更自由</span></label>
+            <input id="is-img2img-denoise" class="text_pole" type="number" min="0.05" max="1" step="0.05" />
+          </div>
+          <div class="is-field">
+            <label>参考图（图生图 / 角色一致性）</label>
+            <input id="is-reference-file" type="file" accept="image/*" class="is-file" />
+            <div class="is-hint">本地 ComfyUI 有参考图时自动使用核心图生图；云端需接口支持参考图（OpenAI 编辑 / Gemini 图像）。手动选的文件仅当前会话有效，角色库参考图会持久保存。</div>
+          </div>
+
+          <div class="is-field">
             <label>工作流</label>
             <select id="is-workflow-mode" class="text_pole">
-              <option value="simple">内置简单工作流</option>
+              <option value="simple">内置工作流（有参考图时自动图生图）</option>
               <option value="custom">自定义 API 工作流</option>
             </select>
           </div>
@@ -182,11 +198,13 @@ export function panelTemplate() {
             <div class="is-subbox-title">自定义工作流（ComfyUI API 格式）</div>
             <div class="is-inline-actions">
               <input id="is-workflow-file" type="file" accept=".json,application/json" class="is-file" />
+              <button type="button" class="is-link" id="is-load-ipadapter">载入 IPAdapter 模板</button>
               <button type="button" class="is-link" id="is-validate-workflow">检查</button>
             </div>
+            <div class="is-hint">IPAdapter 模板需要 ComfyUI 已安装 IPAdapter Plus 节点和对应模型；缺少模型时 ComfyUI 会拒绝提交。</div>
             <textarea id="is-custom-workflow" class="text_pole is-textarea is-mono" rows="6" placeholder="粘贴 ComfyUI 导出的 API 格式 JSON"></textarea>
             <label class="checkbox_label"><input type="checkbox" id="is-auto-bind" /> 没有占位符时自动识别节点</label>
-            <div class="is-hint">占位符：%positive% %negative% %seed% %steps% %cfg% %width% %height% %batch% %checkpoint% %sampler% %scheduler% %vae%</div>
+            <div class="is-hint">占位符：%positive% %negative% %seed% %steps% %cfg% %width% %height% %batch% %checkpoint% %sampler% %scheduler% %vae% %reference%</div>
             <div id="is-workflow-status" class="is-hint"></div>
           </div>
         </div>
@@ -312,7 +330,7 @@ export function panelTemplate() {
     <section class="is-pane" data-is-pane="library" hidden>
       <div class="is-card">
         <div class="is-card-title"><i class="fa-solid fa-address-book"></i> 角色库 <span id="is-library-char" class="is-hint"></span></div>
-        <div class="is-hint">角色资料保存在当前角色卡的 <code>data.extensions.imageStudio.characterLibrary</code>。生成时会把选中角色的外貌/服装写进提示词；参考图先作为素材预览和存档。</div>
+        <div class="is-hint">角色资料保存在当前角色卡的 <code>data.extensions.imageStudio.characterLibrary</code>。生成时会把选中角色的外貌/服装写进提示词，并在有参考图时用于图生图。</div>
         <div class="is-hint">AI 扫描会先用酒馆的激活规则取当前对话相关的世界书条目，再交给插件内部模型提炼外貌；角色卡和用户设定每次全字段扫描（超长字段会截断）。AI 失败会自动退回机械扫描。</div>
         <div class="is-field">
           <label for="is-library-scan-scope">世界书范围</label>
@@ -325,6 +343,10 @@ export function panelTemplate() {
         <div class="is-inline-actions">
           <button type="button" class="menu_button" id="is-library-scan"><i class="fa-solid fa-magnifying-glass"></i> 扫描角色卡 / 世界书</button>
           <button type="button" class="menu_button" id="is-library-add"><i class="fa-solid fa-plus"></i> 添加角色</button>
+        </div>
+        <div class="is-inline-actions">
+          <button type="button" class="menu_button" id="is-library-convert">AI 转所选提示词</button>
+          <button type="button" class="menu_button is-primary" id="is-library-generate">用所选角色生图</button>
         </div>
         <div id="is-library-status" class="is-hint"></div>
       </div>
@@ -353,6 +375,7 @@ export function panelTemplate() {
         </div>
         <div class="is-field"><label>外貌 / 体貌</label><textarea id="is-library-appearance" class="text_pole is-textarea" rows="4"></textarea></div>
         <div class="is-field"><label>服装 / 配饰</label><textarea id="is-library-outfit" class="text_pole is-textarea" rows="2"></textarea></div>
+        <div class="is-field"><label>生图提示词（AI 转换后可手改）</label><textarea id="is-library-prompt" class="text_pole is-textarea" rows="3"></textarea></div>
         <div class="is-field"><label>备注</label><textarea id="is-library-notes" class="text_pole is-textarea" rows="2"></textarea></div>
         <div class="is-field">
           <label>参考图（仅存档 / 预览）</label>
@@ -446,7 +469,7 @@ export function panelTemplate() {
           <div class="is-subbox-title">自定义请求</div>
           <div class="is-field"><label>URL / 模板</label><input id="is-custom-endpoint" class="text_pole" type="text" placeholder="https://..." /></div>
           <div class="is-field"><label>方法</label><select id="is-custom-method" class="text_pole"><option>POST</option><option>GET</option></select></div>
-          <div class="is-field"><label>请求体 JSON（支持 {{prompt}} {{negative}} {{model}} {{width}} {{height}} {{seed}} {{n}}）</label><textarea id="is-custom-body" class="text_pole is-textarea is-mono" rows="4"></textarea></div>
+          <div class="is-field"><label>请求体 JSON（支持 {{prompt}} {{negative}} {{model}} {{width}} {{height}} {{seed}} {{n}} {{reference_base64}} {{referenceMime}}）</label><textarea id="is-custom-body" class="text_pole is-textarea is-mono" rows="4"></textarea></div>
           <div class="is-grid is-grid-2">
             <label>返回图片路径<input id="is-custom-response-path" class="text_pole" type="text" placeholder="data.0.b64_json" /></label>
             <label>图片格式<input id="is-custom-mime" class="text_pole" type="text" placeholder="image/png" /></label>
@@ -516,7 +539,7 @@ export function panelTemplate() {
     <div id="is-confirm-target" class="is-hint"></div>
     <div class="is-field">
       <label>场景提示词（可编辑）</label>
-      <textarea id="is-confirm-scene" class="text_pole is-textarea" rows="4"></textarea>
+      <textarea id="is-confirm-scene" class="text_pole is-textarea" rows="4" placeholder="描述场景；留空则生成角色展示图"></textarea>
     </div>
     <details class="is-negative-wrap">
       <summary>负面提示词</summary>
@@ -532,7 +555,7 @@ export function panelTemplate() {
       <summary>最终提示词预览</summary>
       <pre id="is-confirm-final"></pre>
     </details>
-    <div class="is-hint">参考图目前只用于角色库预览和存档；实际生成使用上方文字。需要图生图时，请在 ComfyUI 自定义工作流中接入参考图节点。</div>
+    <div class="is-hint">生成时使用第一个有参考图的选中角色：本地 ComfyUI 自动走核心图生图，云端需接口支持参考图；不支持时会提示并按文字生成。</div>
     <div class="is-inline-actions is-right">
       <button type="button" class="menu_button" id="is-confirm-cancel">取消</button>
       <button type="button" class="menu_button is-primary" id="is-confirm-generate">生成</button>

@@ -23,6 +23,15 @@ function imagesEndpoint(profile) {
     return `${base}/v1/images/generations`;
 }
 
+function editsEndpoint(profile) {
+    const base = trimBase(profile.baseUrl);
+    if (!base) throw new Error('请填写 API Base URL');
+    if (/\/images\/edits\/?$/i.test(base)) return base;
+    if (/\/v1$/i.test(base)) return `${base}/images/edits`;
+    if (/\/v1\//i.test(base)) return `${base.replace(/\/+$/, '')}/images/edits`;
+    return `${base}/v1/images/edits`;
+}
+
 export function chatEndpoint(profile) {
     const base = trimBase(profile.baseUrl);
     if (!base) throw new Error('请填写 API Base URL');
@@ -68,6 +77,13 @@ function sniffMime(blob, fallback = 'image/png') {
 
 async function blobFromBase64(base64, mime = 'image/png') {
     return base64ToBlob(String(base64).replace(/-/g, '+').replace(/_/g, '/'), mime);
+}
+
+async function blobToBase64(blob) {
+    const buffer = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let index = 0; index < buffer.length; index += 1) binary += String.fromCharCode(buffer[index]);
+    return btoa(binary);
 }
 
 async function resolveImageItem(item, mimeFallback = 'image/png', signal = null) {
@@ -146,6 +162,9 @@ export function buildOpenAIImageBody(profile, params) {
 }
 
 async function generateOpenAI(profile, params) {
+    if (params.reference?.blob) {
+        return generateOpenAIEdit(profile, params);
+    }
     const body = buildOpenAIImageBody(profile, params);
     const headers = {
         ...makeAuthHeaders(profile.apiKey),
@@ -172,6 +191,52 @@ async function generateOpenAI(profile, params) {
     }
     if (results.length === 0) {
         throw new Error(`接口没有返回图片：${JSON.stringify(payload).slice(0, 500)}`);
+    }
+    return results;
+}
+
+async function generateOpenAIEdit(profile, params) {
+    const model = String(params.model || profile.model || '');
+    if (profile.type === 'xai') {
+        throw new Error('xAI 生图接口没有适配参考图编辑；请改用 Gemini / OpenAI，或使用本地 ComfyUI 图生图');
+    }
+    if (profile.type === 'openai' && !/^gpt-image|^dall-e-2/i.test(model)) {
+        throw new Error(`模型 ${model || '(未填写)'} 不支持 /images/edits；请选择 gpt-image-1 或 dall-e-2，或清除参考图`);
+    }
+    const form = new FormData();
+    form.append('image', params.reference.blob, params.reference.filename || 'reference.png');
+    form.append('prompt', params.positive || '');
+    form.append('model', model);
+    form.append('n', String(Math.max(1, Number(params.count || 1))));
+    form.append('size', `${Number(params.width || 1024)}x${Number(params.height || 1024)}`);
+    if (/^dall-e-2/i.test(model)) form.append('response_format', 'b64_json');
+    const extra = parseExtraBody(profile.extraBody);
+    for (const [key, value] of Object.entries(extra)) {
+        if (['string', 'number', 'boolean'].includes(typeof value)) form.append(key, String(value));
+    }
+    const headers = {
+        ...makeAuthHeaders(profile.apiKey),
+        ...parseHeaders(profile.headers),
+    };
+    const payload = await request(editsEndpoint(profile), {
+        method: 'POST',
+        headers,
+        body: form,
+        mode: 'direct',
+        timeout: 10 * 60_000,
+        signal: params.signal,
+    });
+    if (payload?.error) {
+        throw new Error(payload.error.message || JSON.stringify(payload.error));
+    }
+    const items = collectOpenAIItems(payload);
+    const results = [];
+    for (const item of items) {
+        const resolved = await resolveImageItem(item, 'image/png', params.signal);
+        if (resolved) results.push({ ...resolved, mime: sniffMime(resolved.blob) });
+    }
+    if (results.length === 0) {
+        throw new Error(`图片编辑接口没有返回图片：${JSON.stringify(payload).slice(0, 500)}`);
     }
     return results;
 }
@@ -208,6 +273,10 @@ async function generateGemini(profile, params) {
         ...(profile.apiKey ? { 'x-goog-api-key': profile.apiKey } : {}),
     };
     const aspectRatio = params.aspectRatio || sizeToAspect(params.width, params.height);
+    const hasReference = !!params.reference?.blob;
+    if (hasReference && /^imagen/i.test(model)) {
+        throw new Error('当前 Imagen 接口未适配参考图；请改用 Gemini 图像模型，或清除参考图');
+    }
 
     if (/^imagen/i.test(model)) {
         const body = {
@@ -253,8 +322,17 @@ async function generateGemini(profile, params) {
             aspectRatio,
         };
     }
+    const parts = [{ text: promptText }];
+    if (hasReference) {
+        parts.push({
+            inlineData: {
+                mimeType: params.reference.blob.type || 'image/png',
+                data: await blobToBase64(params.reference.blob),
+            },
+        });
+    }
     const body = {
-        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig,
         ...Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'generationConfig')),
     };
@@ -323,6 +401,7 @@ async function generateCustom(profile, params) {
     const extra = parseExtraBody(profile.extraBody);
     const endpoint = custom.endpoint || profile.baseUrl;
     if (!endpoint) throw new Error('请填写自定义接口 URL');
+    const referenceBase64 = params.reference?.blob ? await blobToBase64(params.reference.blob) : '';
     const variables = {
         prompt: params.positive,
         positive: params.positive,
@@ -334,6 +413,10 @@ async function generateCustom(profile, params) {
         seed: params.seed,
         n: params.count,
         key: profile.apiKey || '',
+        reference_base64: referenceBase64,
+        referenceBase64,
+        referenceMime: params.reference?.blob?.type || '',
+        referenceName: params.reference?.name || '',
     };
     let body = null;
     if (custom.body && String(custom.body).trim()) {

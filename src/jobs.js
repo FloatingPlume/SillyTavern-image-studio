@@ -1,6 +1,6 @@
 import { ComfyService } from './comfy.js';
 import { generateCloudImages, parseExtraBody } from './providers.js';
-import { buildCustomWorkflow, buildSimpleWorkflow, summarizeWorkflow } from './workflow.js';
+import { buildCustomWorkflow, buildImg2imgWorkflow, buildSimpleWorkflow, summarizeWorkflow } from './workflow.js';
 import { addHistory, get, getActiveImageProfile, saveSoon } from './store.js';
 import { saveBlobToST } from './history.js';
 import { clamp, toast, truncate, uid } from './util.js';
@@ -311,6 +311,8 @@ function buildHistoryEntry(result, provider) {
         promptId: job.promptId,
         messageId: details.messageId ?? null,
         chatId: details.chatId || '',
+        referenceName: details.reference?.name || '',
+        referencePath: details.reference?.path || '',
     };
 }
 
@@ -321,7 +323,7 @@ function endJob(keepResults = true) {
     emit({});
 }
 
-export async function generateComfy(callbacks, { positive = '', negative = '', meta = {} } = {}) {
+export async function generateComfy(callbacks, { positive = '', negative = '', meta = {}, reference = null } = {}) {
     if (job.active) throw new Error('已有生成任务进行中');
     const settings = get();
     const comfy = new ComfyService();
@@ -339,6 +341,7 @@ export async function generateComfy(callbacks, { positive = '', negative = '', m
         profileName: 'ComfyUI',
         model: settings.comfy.checkpoint,
         workflow: null,
+        reference: reference ? { name: reference.name || '', path: reference.path || '' } : null,
         ...meta,
     };
     resetJob('comfy', callbacks, details);
@@ -384,7 +387,20 @@ export async function generateComfy(callbacks, { positive = '', negative = '', m
             hires: settings.comfy.hires,
             scale: settings.comfy.hires?.scale,
             hiresSteps: settings.comfy.hires?.steps,
+            denoise: Number(settings.comfy.img2imgDenoise ?? 0.55),
+            referenceImage: '',
         };
+
+        if (reference?.blob) {
+            emit({ statusText: '上传参考图到 ComfyUI…' });
+            const filename = `image-studio-ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+            params.referenceImage = await comfy.uploadReference(reference.blob, filename);
+            details.reference = {
+                name: reference.name || '',
+                path: reference.path || '',
+                file: params.referenceImage,
+            };
+        }
 
         let workflow;
         if (settings.comfy.workflowMode === 'custom') {
@@ -393,6 +409,10 @@ export async function generateComfy(callbacks, { positive = '', negative = '', m
             workflow = built.workflow;
             details.workflowNotes = built.notes;
             details.workflowMode = built.mode;
+        } else if (params.referenceImage) {
+            workflow = buildImg2imgWorkflow(params);
+            details.workflowMode = 'img2img';
+            details.workflowNotes = '核心图生图：参考图 → ImageScale → VAEEncode → KSampler';
         } else {
             workflow = buildSimpleWorkflow(params);
             details.workflowMode = 'simple';
@@ -439,7 +459,7 @@ export async function generateComfy(callbacks, { positive = '', negative = '', m
     }
 }
 
-export async function generateCloud(callbacks, { positive = '', negative = '', meta = {} } = {}) {
+export async function generateCloud(callbacks, { positive = '', negative = '', meta = {}, reference = null } = {}) {
     if (job.active) throw new Error('已有生成任务进行中');
     const settings = get();
     const profile = getActiveImageProfile() || settings.imageProfiles[0];
@@ -460,6 +480,7 @@ export async function generateCloud(callbacks, { positive = '', negative = '', m
         width,
         height,
         count: Number(settings.cloud.count || 1),
+        reference: reference ? { name: reference.name || '', path: reference.path || '' } : null,
         ...meta,
     };
     resetJob('cloud', callbacks, details);
@@ -491,6 +512,7 @@ export async function generateCloud(callbacks, { positive = '', negative = '', m
             seed,
             aspectRatio: settings.cloud.heightRatio,
             signal: controller.signal,
+            reference,
         });
         emit({ statusText: `下载 ${results.length} 张图片…` });
         const savedResults = [];

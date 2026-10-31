@@ -14,6 +14,8 @@ export function normalizeLibraryEntry(entry, index = 0) {
         role: ['character', 'user', 'npc'].includes(entry?.role) ? entry.role : 'character',
         appearance: String(entry?.appearance || '').trim(),
         outfit: String(entry?.outfit || '').trim(),
+        prompt: String(entry?.prompt || '').trim(),
+        promptStyle: ['tags', 'natural', 'manual'].includes(entry?.promptStyle) ? entry.promptStyle : '',
         notes: String(entry?.notes || '').trim(),
         referencePath: String(entry?.referencePath || '').trim(),
         referenceName: String(entry?.referenceName || '').trim(),
@@ -463,9 +465,9 @@ export function composeCharacterContext(entries) {
 export function composeFinalPrompt(scene, entries, style = 'tags') {
     const base = String(scene || '').trim();
     const characterBlocks = (entries || [])
-        .filter(entry => entry.name && (entry.appearance || entry.outfit))
+        .filter(entry => entry.name && (entry.prompt || entry.appearance || entry.outfit))
         .map(entry => {
-            const details = [entry.appearance, entry.outfit ? `服装：${entry.outfit}` : ''].filter(Boolean).join('，');
+            const details = entry.prompt || [entry.appearance, entry.outfit ? `服装：${entry.outfit}` : ''].filter(Boolean).join('，');
             return style === 'natural'
                 ? `${entry.name}：${details}`
                 : `${entry.name}，${details}`;
@@ -492,6 +494,8 @@ export function mergeLibraryEntries(existing, incoming) {
             result[index] = {
                 ...entry,
                 id: existing.id,
+                prompt: entry.prompt || existing.prompt,
+                promptStyle: entry.prompt ? entry.promptStyle : existing.promptStyle,
                 referencePath: entry.referencePath || existing.referencePath,
                 referenceName: entry.referenceName || existing.referenceName,
                 updatedAt: Date.now(),

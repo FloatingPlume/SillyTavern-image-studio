@@ -67,7 +67,7 @@ export async function request(url, options = {}) {
     if (payload != null && typeof payload !== 'string' && !(payload instanceof FormData)) {
         payload = JSON.stringify(payload);
     }
-    if (payload != null && !finalHeaders['Content-Type'] && !finalHeaders['content-type']) {
+    if (payload != null && !finalHeaders['Content-Type'] && !finalHeaders['content-type'] && !(payload instanceof FormData)) {
         finalHeaders['Content-Type'] = 'application/json';
     }
 

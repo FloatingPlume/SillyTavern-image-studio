@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 — 2026-10-31
+
+- 角色库新增 AI 提示词转换：把外貌/服装转成标签或自然语言提示词片段并缓存；生成时优先使用转换结果，不再直接追加原始设定长文。
+- 角色库支持勾选角色，一键“AI 转所选提示词”和“用所选角色生图”；留空场景会生成角色展示图，生成前仍有二次确认。
+- 本地 ComfyUI 新增核心图生图：有参考图时自动使用 LoadImage → ImageScale → VAEEncode → KSampler，支持图生图降噪、批量、LoRA、VAE 和高清修复。
+- 参考图通过隐藏 multipart 表单直连上传到 ComfyUI input，避免酒馆 JSON 代理无法转发 multipart 和大图 `sendBeacon` 限制；自定义工作流新增 `%reference%` 占位符和 LoadImage 自动绑定。
+- 新增 `workflows/ipadapter-plus.json` 模板和“载入 IPAdapter 模板”按钮，需用户自备 IPAdapter 模型。
+- 云端参考图：Gemini 图像走 inlineData；OpenAI / OpenAI 兼容走 `/images/edits` 直连 multipart；自定义接口支持 `reference_base64` / `referenceMime` 变量；xAI 和 Imagen 明确提示不支持。
+- 生成页新增参考图预览/清除、图生图降噪参数；消息生图和角色库生图会优先使用选中角色库角色的参考图。
+- 强化 JSON 输出约束：改写、场景提取、角色库扫描和提示词转换都追加最高优先级的“只输出 JSON”契约，酒馆预设路径也会带上。
+- 测试增至 66 项，包含真实 ComfyUI 核心图生图提交验证和云端参考图请求构造测试。
+
 ## 0.6.0 — 2026-10-31
 
 - 角色库扫描改为 AI 提炼：角色卡和用户设定完整读取，世界书默认只取当前对话已被酒馆激活的条目，交给插件内部模型输出结构化的名称、别名、外貌、服装和备注。

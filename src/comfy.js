@@ -149,6 +149,76 @@ export class ComfyService {
         return result;
     }
 
+    async uploadReference(blob, filename) {
+        if (!blob) throw new Error('参考图为空');
+        if (this.config.auth) {
+            throw new Error('ComfyUI 开启了 Basic 认证，浏览器无法直接上传参考图；请暂时关闭认证，或改用不带认证的 ComfyUI 地址');
+        }
+        if (typeof document === 'undefined') {
+            throw new Error('当前环境不支持参考图上传');
+        }
+        const file = new File([blob], filename, { type: blob.type || 'image/png' });
+        const iframe = document.createElement('iframe');
+        iframe.name = `is-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = this.endpoint('/upload/image');
+        form.enctype = 'multipart/form-data';
+        form.target = iframe.name;
+        form.style.display = 'none';
+        const imageInput = document.createElement('input');
+        imageInput.type = 'file';
+        imageInput.name = 'image';
+        try {
+            const transfer = new DataTransfer();
+            transfer.items.add(file);
+            imageInput.files = transfer.files;
+        } catch (error) {
+            form.remove();
+            iframe.remove();
+            throw new Error(`无法把参考图放入上传表单：${error.message || error}`);
+        }
+        const overwrite = document.createElement('input');
+        overwrite.type = 'hidden';
+        overwrite.name = 'overwrite';
+        overwrite.value = 'true';
+        const type = document.createElement('input');
+        type.type = 'hidden';
+        type.name = 'type';
+        type.value = 'input';
+        form.append(imageInput, overwrite, type);
+        document.body.appendChild(form);
+        form.submit();
+        const cleanup = () => {
+            form.remove();
+            iframe.remove();
+        };
+        const cleanupTimer = setTimeout(cleanup, 30_000);
+        let reachable = false;
+        try {
+            for (let attempt = 0; attempt < 60; attempt += 1) {
+                await new Promise(resolve => setTimeout(resolve, 250));
+                try {
+                    const info = await this.fetchNodeInfo('LoadImage');
+                    reachable = true;
+                    const list = info?.LoadImage?.input?.required?.image?.[0] || [];
+                    if (Array.isArray(list) && list.includes(filename)) {
+                        clearTimeout(cleanupTimer);
+                        cleanup();
+                        return filename;
+                    }
+                } catch { /* retry */ }
+            }
+        } finally {
+            clearTimeout(cleanupTimer);
+            cleanup();
+        }
+        if (!reachable) return filename;
+        throw new Error('参考图已发送，但没有出现在 ComfyUI 的 input 列表；请确认 ComfyUI 版本和手机网络');
+    }
+
     async queue() {
         return this.request('/queue', { timeout: 15_000 });
     }

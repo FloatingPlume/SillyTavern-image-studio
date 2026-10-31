@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLibraryScanMessages, parseLibraryScanResult } from '../src/library-scan.js';
+import { buildCharacterPromptMessages, buildLibraryScanMessages, parseCharacterPromptResult, parseLibraryScanResult } from '../src/library-scan.js';
 import { libraryEntriesFromScan } from '../src/character-library.js';
 
 const sources = [
@@ -55,4 +55,29 @@ test('libraryEntriesFromScan maps source roles and provenance notes', () => {
     assert.match(entries[1].source, /^worldbook:Town$/);
     assert.match(entries[1].notes, /世界书「Borin」/);
     assert.equal(entries[1].outfit, '');
+});
+
+test('buildCharacterPromptMessages includes sheets and the JSON output contract', () => {
+    const messages = buildCharacterPromptMessages({
+        style: 'tags',
+        entries: [{ name: 'Aria', appearance: 'silver hair, amber eyes', outfit: 'red cloak' }],
+    });
+    assert.match(messages[0].content, /Danbooru/);
+    assert.match(messages[0].content, /OUTPUT CONTRACT/);
+    assert.match(messages[1].content, /\[Aria\]/);
+    assert.match(messages[1].content, /silver hair/);
+    assert.match(messages[1].content, /red cloak/);
+});
+
+test('parseCharacterPromptResult handles fenced JSON and keeps exact names', () => {
+    const characters = parseCharacterPromptResult('```json\n' + JSON.stringify({
+        characters: [
+            { name: 'Aria', prompt: 'silver hair, amber eyes, red cloak' },
+            { name: 'Borin', tags: 'tall wolf, scar' },
+            { name: 'Nobody', prompt: '' },
+        ],
+    }) + '\n```');
+    assert.equal(characters.length, 2);
+    assert.equal(characters[0].name, 'Aria');
+    assert.match(characters[1].prompt, /tall wolf/);
 });

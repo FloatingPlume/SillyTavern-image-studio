@@ -49,7 +49,12 @@ import {
     saveCharacterLibrary,
     scanCharacterCandidates,
 } from './character-library.js';
-import { buildLibraryScanMessages, parseLibraryScanResult } from './library-scan.js';
+import {
+    buildCharacterPromptMessages,
+    buildLibraryScanMessages,
+    parseCharacterPromptResult,
+    parseLibraryScanResult,
+} from './library-scan.js';
 import {
     MODEL_CATEGORIES,
     canAutoFetchModels,
@@ -124,8 +129,13 @@ const ui = {
     disableMessageRestore: false,
     messageGenBusy: false,
     libraryCandidates: [],
+    librarySelected: new Set(),
+    librarySelectionInitialized: false,
+    libraryConvertBusy: false,
     libraryEditingId: null,
     libraryReferencePath: '',
+    referenceBlob: null,
+    referenceObjectUrl: '',
     sceneConfirm: null,
 };
 
@@ -353,6 +363,8 @@ function refreshForm() {
 
     setValue('is-positive', settings.draft?.positive || '');
     setValue('is-negative', settings.draft?.negative ?? settings.prompt.negative ?? '');
+    setValue('is-img2img-denoise', settings.comfy.img2imgDenoise ?? 0.55);
+    renderReferenceBar();
     setValue('is-count', ui.provider === 'cloud' ? settings.cloud.count : settings.comfy.batch);
     setValue('is-seed', ui.provider === 'cloud' ? settings.cloud.seed : settings.comfy.seed);
     setValue('is-width', ui.provider === 'cloud' ? settings.cloud.width : settings.comfy.width);
@@ -512,7 +524,19 @@ function renderCloudProfiles() {
         const cached = getBalanceCache(profile.id);
         const balanceText = cached?.ok ? ` · 余额 ${formatBalance(cached)}` : '';
         const xaiHint = profile.type === 'xai' ? ' · Grok 尺寸按宽高比/分辨率，不发送 size' : '';
-        setText('is-cloud-hint', `${typeLabel('image', profile.type)} · ${profileHost(profile)} · ${profile.model || '未设默认模型'}${balanceText}${xaiHint}`);
+        const hasReference = !!(settings.draft?.referencePath || ui.referenceBlob);
+        let referenceHint = '';
+        if (hasReference) {
+            const refModel = settings.cloud.model || profile.model;
+            if (profile.type === 'xai') referenceHint = ' · 参考图：xAI 不支持，请清除';
+            else if (profile.type === 'gemini' && /^imagen/i.test(refModel)) referenceHint = ' · 参考图：Imagen 未适配，请换 Gemini 图像模型';
+            else if (profile.type === 'custom' && !/reference/i.test(profile.custom?.body || '')) referenceHint = ' · 参考图：请求体需使用 reference 变量';
+            else if (profile.type === 'openai' && !/^gpt-image|^dall-e-2/i.test(refModel)) referenceHint = ' · 参考图：该模型不支持 edits';
+            else if (profile.type === 'openai-compatible') referenceHint = ' · 参考图：尝试直连 /images/edits（需接口支持 CORS）';
+            else if (profile.type === 'openai') referenceHint = ' · 参考图：直连 /images/edits（需 CORS 与 gpt-image-1/dall-e-2）';
+            else referenceHint = ' · 参考图：将使用图生图/编辑接口';
+        }
+        setText('is-cloud-hint', `${typeLabel('image', profile.type)} · ${profileHost(profile)} · ${profile.model || '未设默认模型'}${balanceText}${xaiHint}${referenceHint}`);
         const imageModels = filterModels(profile.models || [], { category: 'image' }).map(item => item.id);
         const fallbackModels = (profile.models || []).filter(Boolean);
         const choices = imageModels.length ? imageModels : fallbackModels;
@@ -853,7 +877,7 @@ function renderRequestDetails() {
     node.innerHTML = `
         <div class="is-request-block"><div class="is-request-block-head"><span>正面提示词</span><button type="button" class="is-link" data-copy-block>复制</button></div><pre>${escapeHtml(details.positive)}</pre></div>
         <div class="is-request-block"><div class="is-request-block-head"><span>负面提示词</span><button type="button" class="is-link" data-copy-block>复制</button></div><pre>${escapeHtml(details.negative || '（空）')}</pre></div>
-        <div class="is-request-block"><div class="is-request-block-head"><span>参数</span></div><pre>${escapeHtml(`seed: ${details.seed}\nsize: ${details.width}x${details.height}\nmodel: ${details.model || details.checkpoint || ''}\nprovider: ${details.provider}${details.workflowMode ? `\nworkflow: ${details.workflowMode}` : ''}`)}</pre></div>
+        <div class="is-request-block"><div class="is-request-block-head"><span>参数</span></div><pre>${escapeHtml(`seed: ${details.seed}\nsize: ${details.width}x${details.height}\nmodel: ${details.model || details.checkpoint || ''}\nprovider: ${details.provider}${details.workflowMode ? `\nworkflow: ${details.workflowMode}` : ''}${details.reference ? `\nreference: ${details.reference.name || details.reference.file || ''}` : ''}`)}</pre></div>
         ${workflow}`;
 }
 
@@ -875,8 +899,75 @@ function stopJobTimer() {
     }
 }
 
-function jobCallbacks() {
+function referenceSourceUrl() {
+    if (ui.referenceObjectUrl) return ui.referenceObjectUrl;
+    const path = get().draft?.referencePath;
+    return path ? imageUrl(path) : '';
+}
+
+function renderReferenceBar() {
+    const bar = el('is-reference-bar');
+    const image = el('is-reference-thumb');
+    const label = el('is-reference-label');
+    if (!bar || !image || !label) return;
+    const src = referenceSourceUrl();
+    if (!src) {
+        bar.hidden = true;
+        image.removeAttribute('src');
+        label.textContent = '';
+        return;
+    }
+    const name = get().draft?.referenceName || '已选择';
+    bar.hidden = false;
+    image.src = src;
+    label.textContent = `参考图：${name}${ui.referenceBlob ? ' · 本次上传' : ''}`;
+}
+
+function setGenerationReference(reference) {
+    const settings = get();
+    if (ui.referenceObjectUrl) {
+        URL.revokeObjectURL(ui.referenceObjectUrl);
+        ui.referenceObjectUrl = '';
+    }
+    ui.referenceBlob = reference?.blob || null;
+    if (ui.referenceBlob) ui.referenceObjectUrl = URL.createObjectURL(ui.referenceBlob);
+    settings.draft.referencePath = reference?.path || '';
+    settings.draft.referenceName = reference?.name || '';
+    saveSoon();
+    renderReferenceBar();
+    renderCloudProfiles();
+}
+
+function clearGenerationReference() {
+    const input = el('is-reference-file');
+    if (input) input.value = '';
+    setGenerationReference(null);
+}
+
+async function resolveGenerationReference() {
+    if (ui.referenceBlob) {
+        return {
+            blob: ui.referenceBlob,
+            filename: ui.referenceBlob.name || `${get().draft?.referenceName || 'reference'}.png`,
+            name: get().draft?.referenceName || '参考图',
+            path: '',
+        };
+    }
+    const path = get().draft?.referencePath;
+    if (!path) return null;
+    const response = await fetch(imageUrl(path));
+    if (!response.ok) throw new Error(`读取参考图失败：HTTP ${response.status}`);
+    const blob = await response.blob();
+    const name = get().draft?.referenceName || '参考图';
     return {
+        blob,
+        filename: `${name.replace(/[\\/:*?"<>|]/g, '_')}.png`,
+        name,
+        path,
+    };
+}
+
+function jobCallbacks() {    return {
         onUpdate: snapshot => {
             if (snapshot.status === 'done' || snapshot.status === 'error' || snapshot.status === 'cancelled') {
                 stopJobTimer();
@@ -922,6 +1013,13 @@ async function startGeneration() {
         toast('warning', '提示词展开后为空，请检查宏');
         return;
     }
+    let reference = null;
+    try {
+        reference = await resolveGenerationReference();
+    } catch (error) {
+        toast('error', error.message || String(error));
+        return;
+    }
     job.results = [];
     renderResults();
     setHidden('is-job', false);
@@ -931,9 +1029,9 @@ async function startGeneration() {
     setConnection(ui.provider === 'comfy' ? 'busy' : ui.connection, ui.provider === 'comfy' ? 'ComfyUI 连接中…' : '云端请求中…');
     try {
         if (ui.provider === 'cloud') {
-            await generateCloud(jobCallbacks(), { positive: expanded, negative: expandedNegative });
+            await generateCloud(jobCallbacks(), { positive: expanded, negative: expandedNegative, reference });
         } else {
-            await generateComfy(jobCallbacks(), { positive: expanded, negative: expandedNegative });
+            await generateComfy(jobCallbacks(), { positive: expanded, negative: expandedNegative, reference });
         }
     } catch (error) {
         toast('error', error.message || String(error));
@@ -1784,6 +1882,14 @@ function renderLibrary() {
     setText('is-library-char', character ? `当前：${character.name || '未命名'}` : '当前没有打开角色卡');
     renderLibraryScanOptions();
     const entries = getCharacterLibrary();
+    const validIds = new Set(entries.map(entry => entry.id));
+    for (const id of [...ui.librarySelected]) {
+        if (!validIds.has(id)) ui.librarySelected.delete(id);
+    }
+    if (!ui.librarySelectionInitialized && entries.length) {
+        defaultPresentCharacters(entries).forEach(entry => ui.librarySelected.add(entry.id));
+        ui.librarySelectionInitialized = true;
+    }
     const list = el('is-library-list');
     if (!list) return;
     if (!entries.length) {
@@ -1792,7 +1898,11 @@ function renderLibrary() {
     }
     list.innerHTML = entries.map(entry => {
         const thumb = entry.referencePath ? imageUrl(entry.referencePath) : '';
+        const selected = ui.librarySelected.has(entry.id);
         return `<div class="is-library-item" data-library-id="${escapeHtml(entry.id)}">
+            <label class="is-library-check" title="选中后用于 AI 转提示词 / 生图">
+                <input type="checkbox" data-library-check="${escapeHtml(entry.id)}" ${selected ? 'checked' : ''} />
+            </label>
             ${thumb
                 ? `<img class="is-library-thumb" src="${escapeHtml(thumb)}" alt="${escapeHtml(entry.name)}" loading="lazy" />`
                 : '<div class="is-library-thumb is-library-thumb-empty"><i class="fa-solid fa-user"></i></div>'}
@@ -1800,6 +1910,7 @@ function renderLibrary() {
                 <strong>${escapeHtml(entry.name)} <span class="is-badge">${escapeHtml(libraryRoleLabel(entry.role))}</span></strong>
                 <div class="is-hint">${escapeHtml(entry.aliases?.length ? `别名：${entry.aliases.join('、')}` : '无别名')}</div>
                 <div class="is-library-desc">${escapeHtml(truncate(entry.appearance || '未填写外貌', 110))}</div>
+                ${entry.prompt ? '<div class="is-hint is-library-prompt-hint">提示词：已转换</div>' : ''}
                 <div class="is-library-actions">
                     <button type="button" class="is-link" data-library-action="edit" data-id="${escapeHtml(entry.id)}">编辑</button>
                     <button type="button" class="is-link" data-library-action="delete" data-id="${escapeHtml(entry.id)}">删除</button>
@@ -1903,6 +2014,158 @@ async function scanLibrary() {
     }
 }
 
+function selectedLibraryEntries() {
+    return getCharacterLibrary().filter(entry => ui.librarySelected.has(entry.id));
+}
+
+async function ensureLibraryPrompts(entries, { force = false } = {}) {
+    const style = get().prompt.style === 'natural' ? 'natural' : 'tags';
+    const pending = (entries || []).filter(entry =>
+        (entry.appearance || entry.outfit)
+        && (force || !entry.prompt || (entry.promptStyle !== style && entry.promptStyle !== 'manual')));
+    if (!pending.length) return entries;
+    const messages = buildCharacterPromptMessages({ entries: pending, style });
+    const raw = await requestPluginCompletion(messages, { maxTokens: 1400, temperature: 0.25 });
+    const parsed = parseCharacterPromptResult(raw);
+    if (!parsed.length) throw new Error('模型没有返回角色提示词');
+    const promptByName = new Map(parsed.map(item => [item.name.toLowerCase(), item.prompt]));
+    const all = getCharacterLibrary().map(entry => {
+        if (!pending.some(item => item.id === entry.id)) return entry;
+        const names = [entry.name, ...(entry.aliases || [])].map(name => name.toLowerCase());
+        const prompt = names.map(name => promptByName.get(name)).find(Boolean);
+        return prompt
+            ? { ...entry, prompt, promptStyle: style, updatedAt: Date.now() }
+            : entry;
+    });
+    await saveCharacterLibrary(all);
+    renderLibrary();
+    const updated = getCharacterLibrary();
+    return updated.filter(entry => (entries || []).some(item => item.id === entry.id));
+}
+
+function setLibraryActionsDisabled(disabled) {
+    for (const id of ['is-library-convert', 'is-library-generate', 'is-library-scan']) {
+        const button = el(id);
+        if (button) button.disabled = disabled;
+    }
+}
+
+async function convertSelectedLibraryPrompts() {
+    if (ui.libraryConvertBusy) return;
+    const entries = selectedLibraryEntries();
+    if (!entries.length) {
+        toast('warning', '先在角色库里勾选角色');
+        return;
+    }
+    if (!entries.some(entry => entry.appearance || entry.outfit)) {
+        toast('warning', '所选角色没有外貌/服装文字可转换');
+        return;
+    }
+    ui.libraryConvertBusy = true;
+    setLibraryActionsDisabled(true);
+    setText('is-library-status', `AI 转换提示词中…（${entries.length} 个角色）`);
+    try {
+        const updated = await ensureLibraryPrompts(entries, { force: true });
+        const converted = updated.filter(entry => entry.prompt).length;
+        setText('is-library-status', `已转换 ${converted}/${entries.length} 个角色提示词；生成时会优先使用它们`);
+        toast(converted ? 'success' : 'warning', converted ? '角色提示词已更新' : '没有得到可用的角色提示词');
+    } catch (error) {
+        setText('is-library-status', `提示词转换失败：${truncate(error.message || error, 200)}`);
+        toast('error', `提示词转换失败：${truncate(error.message || error, 300)}`);
+    } finally {
+        ui.libraryConvertBusy = false;
+        setLibraryActionsDisabled(false);
+    }
+}
+
+async function generateFromLibrary() {
+    if (ui.libraryConvertBusy) return;
+    if (job.active) {
+        toast('warning', '已有画坊生成任务在运行，等它完成再点');
+        return;
+    }
+    const style = get().prompt.style === 'natural' ? 'natural' : 'tags';
+    let entries = selectedLibraryEntries();
+    if (!entries.length) {
+        toast('warning', '先在角色库里勾选角色');
+        return;
+    }
+    ui.libraryConvertBusy = true;
+    setLibraryActionsDisabled(true);
+    setText('is-library-status', `准备角色提示词…（${entries.length} 个角色）`);
+    try {
+        try {
+            entries = await ensureLibraryPrompts(entries);
+        } catch (error) {
+            console.warn('[画坊] 角色提示词转换失败，使用角色库原文', error);
+            setText('is-library-status', `提示词转换失败，先用角色库原文：${truncate(error.message || error, 120)}`);
+        }
+        const settings = get();
+        const referenceEntry = entries.find(entry => entry.referencePath);
+        setGenerationReference(referenceEntry
+            ? { path: referenceEntry.referencePath, name: referenceEntry.name }
+            : null);
+        setText('is-library-status', `角色提示词已准备（${entries.length} 个角色），确认后生成`);
+        openSceneConfirm({
+            mode: 'library',
+            messageId: null,
+            entries,
+            selectedIds: new Set(entries.map(entry => entry.id)),
+            targetText: entries.map(entry => entry.name).join('、'),
+            style,
+            scene: settings.draft?.positive?.trim() || '',
+            negative: settings.draft?.negative ?? settings.prompt.negative ?? '',
+        });
+        setText('is-confirm-status', '确认后生成；场景留空会生成角色展示图。');
+    } finally {
+        ui.libraryConvertBusy = false;
+        setLibraryActionsDisabled(false);
+    }
+}
+
+async function startLibraryImageGeneration(positive, negative, entries) {
+    if (!positive) {
+        toast('warning', '角色库生成的提示词为空');
+        return;
+    }
+    const settings = get();
+    settings.draft.positive = positive;
+    settings.draft.negative = negative;
+    saveSoon();
+    setValue('is-positive', positive);
+    setValue('is-negative', negative);
+    let reference = null;
+    try {
+        reference = await resolveGenerationReference();
+    } catch (error) {
+        toast('warning', `参考图读取失败，将按文字生成：${truncate(error.message || error, 160)}`);
+    }
+    switchTab('generate');
+    job.results = [];
+    renderResults();
+    setHidden('is-job', false);
+    setHidden('is-cancel', true);
+    setHidden('is-generate', false);
+    startJobTimer();
+    setConnection(ui.provider === 'comfy' ? 'busy' : ui.connection, ui.provider === 'comfy' ? 'ComfyUI 连接中…' : '云端请求中…');
+    const meta = {
+        source: 'library',
+        libraryIds: (entries || []).map(entry => entry.id),
+    };
+    try {
+        if (ui.provider === 'cloud') {
+            await generateCloud(jobCallbacks(), { positive, negative, meta, reference });
+        } else {
+            await generateComfy(jobCallbacks(), { positive, negative, meta, reference });
+        }
+    } catch (error) {
+        toast('error', `角色库生图失败：${truncate(error.message || error, 350)}`);
+    } finally {
+        renderJob();
+        renderResults();
+    }
+}
+
 async function addSelectedLibraryCandidates() {
     const ids = [...document.querySelectorAll('[data-library-candidate]:checked')]
         .map(input => input.dataset.libraryCandidate);
@@ -1914,6 +2177,12 @@ async function addSelectedLibraryCandidates() {
     try {
         const entries = mergeLibraryEntries(getCharacterLibrary(), selected);
         await saveCharacterLibrary(entries);
+        const saved = getCharacterLibrary();
+        for (const candidate of selected) {
+            const entry = saved.find(item => item.name.toLowerCase() === candidate.name.toLowerCase());
+            if (entry) ui.librarySelected.add(entry.id);
+        }
+        ui.librarySelectionInitialized = true;
         ui.libraryCandidates = [];
         renderLibraryCandidates();
         renderLibrary();
@@ -1957,6 +2226,7 @@ function openLibraryEditor(entry = null) {
     setValue('is-library-role', entry?.role || 'character');
     setValue('is-library-appearance', entry?.appearance || '');
     setValue('is-library-outfit', entry?.outfit || '');
+    setValue('is-library-prompt', entry?.prompt || '');
     setValue('is-library-notes', entry?.notes || '');
     updateLibraryReferencePreview();
     const editor = el('is-library-editor');
@@ -1982,6 +2252,7 @@ async function saveLibraryEditor() {
     }
     try {
         let entries = getCharacterLibrary();
+        const prompt = String(valueOf('is-library-prompt') || '').trim();
         const entry = normalizeLibraryEntry({
             id: ui.libraryEditingId || undefined,
             name,
@@ -1989,6 +2260,8 @@ async function saveLibraryEditor() {
             role: valueOf('is-library-role') || 'character',
             appearance: valueOf('is-library-appearance'),
             outfit: valueOf('is-library-outfit'),
+            prompt,
+            promptStyle: prompt ? 'manual' : '',
             notes: valueOf('is-library-notes'),
             referencePath: ui.libraryReferencePath,
             referenceName: '',
@@ -1999,6 +2272,11 @@ async function saveLibraryEditor() {
         else entries.push(entry);
         await saveCharacterLibrary(entries);
         closeLibraryEditor();
+        const saved = getCharacterLibrary().find(item => item.name.toLowerCase() === name.toLowerCase());
+        if (saved) {
+            ui.librarySelected.add(saved.id);
+            ui.librarySelectionInitialized = true;
+        }
         renderLibrary();
         setText('is-library-status', '角色库已保存到当前角色卡');
         toast('success', '角色已保存');
@@ -2014,6 +2292,7 @@ async function deleteLibraryEntry(id) {
     try {
         const entries = getCharacterLibrary().filter(item => item.id !== id);
         await saveCharacterLibrary(entries);
+        ui.librarySelected.delete(id);
         renderLibrary();
         toast('success', '已删除');
     } catch (error) {
@@ -2255,7 +2534,8 @@ function renderConfirmCharacters() {
  */
 function openSceneConfirm(data) {
     ui.sceneConfirm = data;
-    setText('is-confirm-target', `目标消息：${truncate(data.targetText || '（无文本）', 240)}`);
+    const label = data.mode === 'library' ? '角色库' : '目标消息';
+    setText('is-confirm-target', `${label}：${truncate(data.targetText || '（无文本）', 240)}`);
     setValue('is-confirm-scene', data.scene);
     setValue('is-confirm-negative', data.negative || '');
     setText('is-confirm-status', data.entries.length ? '' : '角色库为空；可先去角色库扫描，或直接生成纯场景图。');
@@ -2356,6 +2636,12 @@ async function startMessageImageGeneration(messageId, positive, negative) {
     setValue('is-positive', positive);
     setValue('is-negative', negative);
     saveSoon();
+    let reference = null;
+    try {
+        reference = await resolveGenerationReference();
+    } catch (error) {
+        console.warn('[画坊] 参考图读取失败，按文字生成', error);
+    }
     setMessageState(messageId, '生成中…');
 
     const meta = { messageId: Number(messageId), chatId, source: 'message' };
@@ -2398,9 +2684,9 @@ async function startMessageImageGeneration(messageId, positive, negative) {
     };
     try {
         if (settings.provider === 'cloud') {
-            await generateCloud(callbacks, { positive, negative, meta });
+            await generateCloud(callbacks, { positive, negative, meta, reference });
         } else {
-            await generateComfy(callbacks, { positive, negative, meta });
+            await generateComfy(callbacks, { positive, negative, meta, reference });
         }
     } catch (error) {
         ui.messageGenBusy = false;
@@ -2412,7 +2698,11 @@ async function startMessageImageGeneration(messageId, positive, negative) {
 
 async function confirmSceneGeneration() {
     if (!ui.sceneConfirm) return;
-    const scene = String(valueOf('is-confirm-scene') || '').trim();
+    const mode = ui.sceneConfirm.mode || 'message';
+    const rawScene = String(valueOf('is-confirm-scene') || '').trim();
+    const scene = rawScene || (mode === 'library'
+        ? 'full body character reference, neutral background, soft lighting'
+        : '');
     if (!scene) {
         setText('is-confirm-status', '场景提示词不能为空');
         return;
@@ -2421,6 +2711,19 @@ async function confirmSceneGeneration() {
     const negative = String(valueOf('is-confirm-negative') || '').trim();
     const positive = composeFinalPrompt(scene, entries, ui.sceneConfirm.style || 'tags');
     const messageId = ui.sceneConfirm.messageId;
+    if (mode === 'library') {
+        const referenceEntry = entries.find(entry => entry.referencePath);
+        setGenerationReference(referenceEntry
+            ? { path: referenceEntry.referencePath, name: referenceEntry.name }
+            : null);
+        closeSceneConfirm(false);
+        await startLibraryImageGeneration(positive, negative, entries);
+        return;
+    }
+    const referenceEntry = entries.find(entry => entry.referencePath);
+    if (referenceEntry) {
+        setGenerationReference({ path: referenceEntry.referencePath, name: referenceEntry.name });
+    }
     closeSceneConfirm(false);
     await startMessageImageGeneration(messageId, positive, negative);
 }
@@ -2451,6 +2754,9 @@ function bindChatMessageEvents() {
                 ui.disableMessageRestore = false;
                 closeLibraryEditor();
                 ui.libraryCandidates = [];
+                ui.librarySelected.clear();
+                ui.librarySelectionInitialized = false;
+                clearGenerationReference();
                 renderLibraryCandidates();
                 if (ui.tab === 'library') renderLibrary();
                 setTimeout(schedule, 250);
@@ -2589,6 +2895,14 @@ function bindEvents() {
             scanLibrary();
             return;
         }
+        if (target.closest('#is-library-convert')) {
+            convertSelectedLibraryPrompts();
+            return;
+        }
+        if (target.closest('#is-library-generate')) {
+            generateFromLibrary();
+            return;
+        }
         if (target.closest('#is-library-add')) {
             openLibraryEditor();
             return;
@@ -2671,6 +2985,10 @@ function bindEvents() {
             startGeneration();
             return;
         }
+        if (target.closest('#is-reference-clear')) {
+            clearGenerationReference();
+            return;
+        }
         if (target.closest('#is-cancel')) {
             cancelJob();
             return;
@@ -2745,6 +3063,10 @@ function bindEvents() {
         }
         if (target.closest('#is-validate-workflow')) {
             validateWorkflow();
+            return;
+        }
+        if (target.closest('#is-load-ipadapter')) {
+            loadIpadapterTemplate();
             return;
         }
         if (target.closest('#is-lb-close')) {
@@ -2940,6 +3262,10 @@ function bindEvents() {
                 settings.comfy[target.id === 'is-steps' ? 'steps' : 'cfg'] = Number(target.value);
                 saveSoon();
                 break;
+            case 'is-img2img-denoise':
+                settings.comfy.img2imgDenoise = clamp(Number(target.value || 0.55), 0.05, 1);
+                saveSoon();
+                break;
             case 'is-hires-scale':
             case 'is-hires-steps':
             case 'is-hires-denoise': {
@@ -3015,6 +3341,17 @@ function bindEvents() {
         if (target?.id === 'is-library-reference-file') {
             const file = target.files?.[0];
             setLibraryReferenceFile(file);
+            return;
+        }
+        if (target?.id === 'is-reference-file') {
+            const file = target.files?.[0];
+            if (file) setGenerationReference({ blob: file, name: file.name });
+            return;
+        }
+        if (target?.matches?.('[data-library-check]')) {
+            const id = target.dataset.libraryCheck;
+            if (target.checked) ui.librarySelected.add(id);
+            else ui.librarySelected.delete(id);
             return;
         }
         if (target?.matches?.('[data-confirm-char]')) {
@@ -3207,6 +3544,30 @@ function validateWorkflow() {
         saveSoon();
     } catch (error) {
         setText('is-workflow-status', `无效：${error.message || error}`);
+    }
+}
+
+async function loadIpadapterTemplate() {
+    try {
+        const response = await fetch(new URL('../workflows/ipadapter-plus.json', import.meta.url));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        const settings = get();
+        settings.comfy.customWorkflow = text;
+        settings.comfy.workflowMode = 'custom';
+        setValue('is-custom-workflow', text);
+        setValue('is-workflow-mode', 'custom');
+        saveSoon();
+        syncWorkflowVisibility();
+        validateWorkflow();
+        setText('is-workflow-status', '已载入 IPAdapter Plus 模板 · 需要参考图和 IPAdapter 模型');
+        if (!get().draft?.referencePath && !ui.referenceBlob) {
+            toast('warning', 'IPAdapter 模板需要参考图；请先在角色库选择角色或在高级参数里选图');
+        } else {
+            toast('success', '已载入 IPAdapter 模板');
+        }
+    } catch (error) {
+        toast('error', `载入模板失败：${error.message || error}`);
     }
 }
 

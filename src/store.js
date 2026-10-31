@@ -29,6 +29,7 @@ function defaultSettings() {
             height: 1024,
             batch: 1,
             seed: -1,
+            img2imgDenoise: 0.55,
             loras: [],
             hires: {
                 enabled: false,
@@ -75,6 +76,8 @@ function defaultSettings() {
         draft: {
             positive: '',
             negative: DEFAULT_NEGATIVE,
+            referencePath: '',
+            referenceName: '',
         },
         history: [],
         balanceCache: {},

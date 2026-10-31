@@ -114,6 +114,146 @@ export function buildSimpleWorkflow(params) {
     return workflow;
 }
 
+export function buildImg2imgWorkflow(params) {
+    const {
+        checkpoint,
+        positive,
+        negative,
+        width,
+        height,
+        batch,
+        seed,
+        steps,
+        cfg,
+        sampler,
+        scheduler,
+        vae,
+        loras = [],
+        hires = null,
+        referenceImage,
+        denoise = 0.55,
+    } = params;
+    if (!checkpoint) throw new Error('没有选择 checkpoint');
+    if (!referenceImage) throw new Error('图生图模式缺少参考图');
+
+    const workflow = {
+        1: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: checkpoint } },
+        2: { class_type: 'CLIPTextEncode', inputs: { text: positive || '', clip: ['1', 1] } },
+        3: { class_type: 'CLIPTextEncode', inputs: { text: negative || '', clip: ['1', 1] } },
+        4: { class_type: 'LoadImage', inputs: { image: referenceImage } },
+        5: {
+            class_type: 'ImageScale',
+            inputs: {
+                image: ['4', 0],
+                upscale_method: 'lanczos',
+                width,
+                height,
+                crop: 'center',
+            },
+        },
+        6: {
+            class_type: 'KSampler',
+            inputs: {
+                seed,
+                steps,
+                cfg,
+                sampler_name: sampler || 'euler',
+                scheduler: scheduler || 'normal',
+                denoise: clampDenoise(denoise),
+                model: ['1', 0],
+                positive: ['2', 0],
+                negative: ['3', 0],
+                latent_image: null,
+            },
+        },
+    };
+
+    let scaledRef = ['5', 0];
+    if (Number(batch) > 1) {
+        workflow[7] = { class_type: 'RepeatImageBatch', inputs: { image: scaledRef, amount: Number(batch) } };
+        scaledRef = ['7', 0];
+    }
+
+    let modelRef = ['1', 0];
+    let clipRef = ['1', 1];
+    let lastNode = 10;
+    for (const lora of loras.filter(item => item?.name)) {
+        const id = String(lastNode++);
+        workflow[id] = {
+            class_type: 'LoraLoader',
+            inputs: {
+                model: modelRef,
+                clip: clipRef,
+                lora_name: lora.name,
+                strength_model: Number(lora.strengthModel ?? 0.8),
+                strength_clip: Number(lora.strengthClip ?? 0.8),
+            },
+        };
+        modelRef = [id, 0];
+        clipRef = [id, 1];
+    }
+    workflow[2].inputs.clip = clipRef;
+    workflow[3].inputs.clip = clipRef;
+    workflow[6].inputs.model = modelRef;
+
+    let vaeRef = ['1', 2];
+    if (vae) {
+        workflow[100] = { class_type: 'VAELoader', inputs: { vae_name: vae } };
+        vaeRef = ['100', 0];
+    }
+
+    workflow[8] = {
+        class_type: 'VAEEncode',
+        inputs: { pixels: scaledRef, vae: vaeRef },
+    };
+    workflow[6].inputs.latent_image = ['8', 0];
+
+    let outputSamples = ['6', 0];
+    if (hires?.enabled) {
+        workflow[20] = {
+            class_type: 'LatentUpscaleBy',
+            inputs: {
+                samples: ['6', 0],
+                upscale_method: 'nearest-exact',
+                scale_by: Number(hires.scale || 1.5),
+            },
+        };
+        workflow[21] = {
+            class_type: 'KSampler',
+            inputs: {
+                seed,
+                steps: Number(hires.steps || 14),
+                cfg,
+                sampler_name: sampler || 'euler',
+                scheduler: scheduler || 'normal',
+                denoise: Number(hires.denoise ?? 0.35),
+                model: modelRef,
+                positive: ['2', 0],
+                negative: ['3', 0],
+                latent_image: ['20', 0],
+            },
+        };
+        outputSamples = ['21', 0];
+    }
+
+    workflow[50] = {
+        class_type: 'VAEDecode',
+        inputs: { samples: outputSamples, vae: vaeRef },
+    };
+    workflow[51] = {
+        class_type: 'SaveImage',
+        inputs: { images: ['50', 0], filename_prefix: 'image-studio' },
+    };
+
+    return workflow;
+}
+
+function clampDenoise(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0.55;
+    return Math.min(1, Math.max(0.05, number));
+}
+
 export function parseWorkflow(text) {
     if (!text || !String(text).trim()) throw new Error('工作流为空');
     let parsed;
@@ -166,6 +306,7 @@ const PLACEHOLDERS = {
     '%scale%': 'scale',
     '%hires_steps%': 'hiresSteps',
     '%vae%': 'vae',
+    '%reference%': 'referenceImage',
 };
 
 export function workflowHasPlaceholders(workflow) {
@@ -196,6 +337,7 @@ export function replacePlaceholders(workflow, params) {
         scale: Number(params.scale ?? 1.5),
         hiresSteps: Number(params.hiresSteps ?? 14),
         vae: params.vae ?? '',
+        referenceImage: params.referenceImage ?? '',
     };
 
     walkInputs(workflow, (_nodeId, _node, inputName, value) => {
@@ -294,6 +436,15 @@ export function autoBindWorkflow(workflow, params) {
         String(node.class_type).includes('SaveImage') && node.inputs && ('filename_prefix' in node.inputs));
     for (const [, saver] of saveNodes) {
         setInputIfPresent(saver, 'filename_prefix', 'image-studio');
+    }
+
+    if (params.referenceImage) {
+        const imageLoaders = findNodes(workflow, node =>
+            String(node.class_type).includes('LoadImage') && node.inputs && ('image' in node.inputs));
+        if (imageLoaders.length > 0) {
+            setInputIfPresent(imageLoaders[0][1], 'image', params.referenceImage);
+            notes.push(`参考图 → 节点 ${imageLoaders[0][0]}`);
+        }
     }
 
     return notes;

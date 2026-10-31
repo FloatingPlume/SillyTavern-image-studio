@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     buildCustomWorkflow,
+    buildImg2imgWorkflow,
     buildSimpleWorkflow,
     parseWorkflow,
     summarizeWorkflow,
@@ -55,6 +56,47 @@ test('simple workflow supports LoRA chain, separate VAE and hires pass', () => {
     assert.equal(workflow['9'].inputs.denoise, 0.4);
     assert.deepEqual(workflow['11'].inputs.samples, ['9', 0]);
     assert.deepEqual(workflow['11'].inputs.vae, ['100', 0]);
+});
+
+test('img2img workflow scales the reference, repeats batches and encodes latents', () => {
+    const workflow = buildImg2imgWorkflow({
+        ...baseParams,
+        batch: 2,
+        referenceImage: 'reference.png',
+        denoise: 0.48,
+    });
+    assert.equal(workflow['4'].class_type, 'LoadImage');
+    assert.equal(workflow['4'].inputs.image, 'reference.png');
+    assert.equal(workflow['5'].class_type, 'ImageScale');
+    assert.equal(workflow['7'].class_type, 'RepeatImageBatch');
+    assert.equal(workflow['7'].inputs.amount, 2);
+    assert.equal(workflow['8'].class_type, 'VAEEncode');
+    assert.deepEqual(workflow['8'].inputs.pixels, ['7', 0]);
+    assert.deepEqual(workflow['6'].inputs.latent_image, ['8', 0]);
+    assert.equal(workflow['6'].inputs.denoise, 0.48);
+});
+
+test('custom workflow accepts %reference% and auto-binds LoadImage.image', () => {
+    const placeholder = {
+        1: { class_type: 'LoadImage', inputs: { image: '%reference%' } },
+        2: { class_type: 'KSampler', inputs: { seed: 1 } },
+    };
+    const built = buildCustomWorkflow(JSON.stringify(placeholder), {
+        ...baseParams,
+        referenceImage: 'uploaded.png',
+    });
+    assert.equal(built.workflow['1'].inputs.image, 'uploaded.png');
+
+    const auto = {
+        1: { class_type: 'LoadImage', inputs: { image: 'old.png' } },
+        2: { class_type: 'KSampler', inputs: { seed: 1 } },
+    };
+    const bound = buildCustomWorkflow(JSON.stringify(auto), {
+        ...baseParams,
+        referenceImage: 'uploaded.png',
+    }, true);
+    assert.equal(bound.workflow['1'].inputs.image, 'uploaded.png');
+    assert.ok(bound.notes.some(note => note.includes('参考图')));
 });
 
 test('parseWorkflow rejects UI-format exports and accepts wrapped API prompts', () => {

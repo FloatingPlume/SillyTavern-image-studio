@@ -96,6 +96,8 @@ export function buildCharacterPrompt() {
     return [`masterpiece, best quality, ${name}`, description, scene].filter(Boolean).join(', ');
 }
 
+const REWRITE_OUTPUT_CONTRACT = 'OUTPUT CONTRACT (highest priority): reply with exactly one JSON object and nothing else. Start with { and end with }. No markdown fences, no explanations, no roleplay continuation, no text before or after the JSON. Schema: {"positive":"...","negative":"...","characters":[]}';
+
 export function buildRewriteMessages({
     style = 'tags',
     intent = '',
@@ -123,7 +125,7 @@ export function buildRewriteMessages({
         ? ' A character library is provided below. Select only characters actually present in the target moment, list their exact names in "characters", and treat the library appearance/outfit as authoritative. Do not repeat fixed appearance details unnecessarily; focus the prompt on scene, action, expression, clothing changes and lighting.'
         : '';
     const baseSystem = systemOverride != null ? systemOverride : (settings.prompt.rewriteSystem || '');
-    const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles.${libraryRule} Return JSON only: {"positive":"...","negative":"...","characters":[]}`;
+    const system = `${baseSystem}\n${stylePrompt}\nFocus on the target moment: extract only what is visually present or strongly implied there. Do not summarize the whole conversation, do not invent a different scene, and keep the character's established appearance and clothing consistent. Ignore dialogue formatting, UI text and speech bubbles.${libraryRule}\n${REWRITE_OUTPUT_CONTRACT}`;
 
     const count = contextMessages == null
         ? settings.pluginModel?.contextMessages ?? 4
@@ -140,6 +142,7 @@ export function buildRewriteMessages({
         `What the user wants to see: ${intent || truncate(positive, 800) || 'an illustration of the current scene'}`,
         negative ? `Existing negative prompt: ${negative}` : '',
         'Keep the character visually consistent. Do not invent a different character.',
+        REWRITE_OUTPUT_CONTRACT,
     ].filter(Boolean).join('\n\n');
 
     return [

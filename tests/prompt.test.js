@@ -26,6 +26,7 @@ test('buildRewriteMessages puts the target message and visual-continuity rules i
     assert.match(messages[0].content, /custom system/);
     assert.match(messages[0].content, /target moment/i);
     assert.match(messages[1].content, /A turns around under the rain/);
+    assert.match(messages[1].content, /OUTPUT CONTRACT/);
 });
 
 test('parseRewriteResult reads the expected JSON shape and character selection', () => {

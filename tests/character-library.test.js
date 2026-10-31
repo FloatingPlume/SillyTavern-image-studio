@@ -25,6 +25,7 @@ test('normalizeLibraryEntry splits aliases and fills defaults', () => {
     assert.equal(entry.name, 'X');
     assert.deepEqual(entry.aliases, ['a', 'b', 'c']);
     assert.equal(entry.role, 'character');
+    assert.equal(entry.prompt, '');
     assert.ok(entry.id);
 });
 
@@ -35,6 +36,19 @@ test('matchPresentCharacters and matchCharacterNames find library entries', () =
 
 test('defaultPresentCharacters prefers the current card and persona', () => {
     assert.deepEqual(defaultPresentCharacters(entries).map(entry => entry.name), ['Aria', 'User']);
+});
+
+test('composeFinalPrompt prefers converted character prompts over raw sheets', () => {
+    const entry = normalizeLibraryEntry({
+        name: 'Aria',
+        appearance: 'a very long raw appearance that should not be used',
+        outfit: 'raw outfit',
+        prompt: 'silver hair, amber eyes, red cloak',
+        promptStyle: 'tags',
+    });
+    const prompt = composeFinalPrompt('rainy rooftop', [entry], 'tags');
+    assert.match(prompt, /silver hair/);
+    assert.doesNotMatch(prompt, /very long raw appearance/);
 });
 
 test('composeFinalPrompt appends authoritative appearance and outfit', () => {
@@ -149,9 +163,10 @@ test('saveCharacterLibrary writes to the current character extension field', asy
 });
 
 test('mergeLibraryEntries updates existing entries without dropping their reference image', () => {
-    const existing = [{ ...entries[0], referencePath: '/user/images/char/a.png' }];
+    const existing = [{ ...entries[0], referencePath: '/user/images/char/a.png', prompt: 'silver hair, red cloak', promptStyle: 'tags' }];
     const merged = mergeLibraryEntries(existing, [{ ...entries[0], appearance: 'updated fur' }]);
     assert.equal(merged.length, 1);
     assert.equal(merged[0].appearance, 'updated fur');
     assert.equal(merged[0].referencePath, '/user/images/char/a.png');
+    assert.equal(merged[0].prompt, 'silver hair, red cloak');
 });

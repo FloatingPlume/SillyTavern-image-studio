@@ -38,7 +38,7 @@ export function buildLibraryScanMessages({ sources = [], existingNames = [] } = 
             `[${source.id}] ${sourceKindLabel(source.kind)}「${source.title || source.name || ''}」`,
             source.content,
         ].join('\n')),
-        'Return only the JSON object. Use the exact source ids in sourceIds.',
+        'Return only the JSON object. Use the exact source ids in sourceIds. OUTPUT CONTRACT (highest priority): start with { and end with }, no markdown fences, no commentary, no text before or after the JSON. Schema: {"characters":[{"name":"...","aliases":[],"role":"npc","appearance":"...","outfit":"...","notes":"...","sourceIds":[]}]}',
     ].filter(Boolean).join('\n\n');
     return [
         { role: 'system', content: LIBRARY_SCAN_SYSTEM },
@@ -100,4 +100,58 @@ export function parseLibraryScanResult(text) {
         else byName.set(key, character);
     }
     return [...byName.values()].slice(0, MAX_CHARACTERS);
+}
+
+export const CHARACTER_PROMPT_SYSTEM = `You convert character sheets into compact image-generation prompt fragments.
+Return a separate prompt fragment for every character in the input.
+
+Style rules:
+- tags: English Danbooru-style tags separated by commas. Include species, body type, hair/fur, eyes, skin, face, ears, tail, horns, scars, tattoos, apparent age, and default outfit. Do not include the character name, quality tags, scene, pose, lighting, camera, or artist names.
+- natural: one concise English sentence describing only permanent appearance and default outfit. Do not include the character name or scene.
+
+Rules:
+- Use only the supplied appearance/outfit/notes. Never invent details.
+- Do not merge different characters.
+- OUTPUT CONTRACT (highest priority): your entire reply must be one JSON object starting with { and ending with }. No markdown fences, no commentary, no roleplay, no text before or after the JSON.
+- Schema: {"characters":[{"name":"exact input name","prompt":"..."}]}`;
+
+function promptStyleInstruction(style) {
+    return style === 'natural'
+        ? 'Write one concise English sentence per character.'
+        : 'Write English Danbooru-style comma-separated tags per character.';
+}
+
+export function buildCharacterPromptMessages({ entries = [], style = 'tags' } = {}) {
+    const usable = (entries || []).filter(entry => entry?.name && (entry.appearance || entry.outfit));
+    const characterBlocks = usable.map(entry => [
+        `[${entry.name}]`,
+        `appearance: ${entry.appearance || '(none)'}`,
+        `outfit: ${entry.outfit || '(none)'}`,
+    ].filter(Boolean).join('\n'));
+    const user = [
+        promptStyleInstruction(style),
+        `Characters: ${usable.length}`,
+        ...characterBlocks,
+        'Return exactly one JSON object. Preserve every input name exactly in the name field.',
+    ].join('\n\n');
+    return [
+        { role: 'system', content: CHARACTER_PROMPT_SYSTEM },
+        { role: 'user', content: user },
+    ];
+}
+
+export function parseCharacterPromptResult(text) {
+    const parsed = parseJsonLoose(String(text || '').trim());
+    const list = Array.isArray(parsed) ? parsed
+        : Array.isArray(parsed?.characters) ? parsed.characters
+            : [];
+    const byName = new Map();
+    for (const item of list.slice(0, MAX_CHARACTERS)) {
+        if (!item || typeof item !== 'object') continue;
+        const name = String(item.name || '').trim();
+        const prompt = String(item.prompt || item.positive || item.tags || '').trim();
+        if (!name || !prompt) continue;
+        byName.set(name.toLowerCase(), { name, prompt });
+    }
+    return [...byName.values()];
 }
