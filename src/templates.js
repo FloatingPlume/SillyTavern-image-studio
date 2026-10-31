@@ -313,6 +313,15 @@ export function panelTemplate() {
       <div class="is-card">
         <div class="is-card-title"><i class="fa-solid fa-address-book"></i> 角色库 <span id="is-library-char" class="is-hint"></span></div>
         <div class="is-hint">角色资料保存在当前角色卡的 <code>data.extensions.imageStudio.characterLibrary</code>。生成时会把选中角色的外貌/服装写进提示词；参考图先作为素材预览和存档。</div>
+        <div class="is-hint">AI 扫描会先用酒馆的激活规则取当前对话相关的世界书条目，再交给插件内部模型提炼外貌；角色卡和用户设定每次全字段扫描（超长字段会截断）。AI 失败会自动退回机械扫描。</div>
+        <div class="is-field">
+          <label for="is-library-scan-scope">世界书范围</label>
+          <select id="is-library-scan-scope" class="text_pole">
+            <option value="active">当前对话激活条目（推荐）</option>
+            <option value="all">整本关联世界书（更慢、更耗 token）</option>
+          </select>
+        </div>
+        <label class="checkbox_label"><input type="checkbox" id="is-library-ai-scan" checked /> 使用插件内部模型提炼外貌</label>
         <div class="is-inline-actions">
           <button type="button" class="menu_button" id="is-library-scan"><i class="fa-solid fa-magnifying-glass"></i> 扫描角色卡 / 世界书</button>
           <button type="button" class="menu_button" id="is-library-add"><i class="fa-solid fa-plus"></i> 添加角色</button>
@@ -377,7 +386,7 @@ export function panelTemplate() {
       <div id="is-current-chat" class="is-brief is-current-chat"></div>
 
       <div class="is-card is-plugin-model">
-        <div class="is-card-title"><i class="fa-solid fa-microchip"></i> 插件内部模型 <span class="is-hint">场景提取 · 角色挑选 · 提示词改写</span></div>
+        <div class="is-card-title"><i class="fa-solid fa-microchip"></i> 插件内部模型 <span class="is-hint">场景提取 · 角色挑选 · 角色库扫描 · 提示词改写</span></div>
         <div class="is-hint">只影响画坊自己的 AI 任务；不会切换或修改酒馆聊天 API、预设和角色扮演。可以单独选一个便宜的小模型，并限制附带的上下文条数。</div>
         <div class="is-field">
           <label for="is-plugin-mode">使用</label>

@@ -37,9 +37,11 @@ import {
 } from './util.js';
 import { ComfyService } from './comfy.js';
 import {
+    collectLibraryScanSources,
     composeFinalPrompt,
     defaultPresentCharacters,
     getCharacterLibrary,
+    libraryEntriesFromScan,
     matchCharacterNames,
     matchPresentCharacters,
     mergeLibraryEntries,
@@ -47,6 +49,7 @@ import {
     saveCharacterLibrary,
     scanCharacterCandidates,
 } from './character-library.js';
+import { buildLibraryScanMessages, parseLibraryScanResult } from './library-scan.js';
 import {
     MODEL_CATEGORIES,
     canAutoFetchModels,
@@ -107,6 +110,7 @@ const ui = {
     lightbox: null,
     resultUrls: new Map(),
     rewriteBusy: false,
+    libraryScanBusy: false,
     lastErrorToast: '',
     editorModels: [],
     modelCategory: 'all',
@@ -1543,6 +1547,19 @@ function reuseEntry(entry) {
     toast('success', '参数已复用');
 }
 
+async function requestPluginCompletion(messages, { maxTokens = 800, temperature = 0.6 } = {}) {
+    const route = currentPluginRoute();
+    if (route.mode === 'current') {
+        return await rewriteWithCurrentApi(messages, maxTokens);
+    }
+    if (route.mode === 'profile') {
+        if (!route.profile) throw new Error('插件内部模型未就绪：请到 API 页选择画坊聊天 API');
+        return await chatComplete(route.profile, messages, { maxTokens, temperature });
+    }
+    if (!route.connection) throw new Error('插件内部模型未就绪：请到 API 页选择酒馆连接配置');
+    return await rewriteWithConnectionProfile(route.connection.id, messages, maxTokens);
+}
+
 async function requestRewrite({ style, intent, positive, negative, targetMessage = '', targetIndex = null, libraryEntries = [] }) {
     const settings = get();
     const chat = ctx()?.chat || [];
@@ -1746,10 +1763,26 @@ function libraryRoleLabel(role) {
     return role === 'user' ? '用户角色' : role === 'npc' ? 'NPC' : '角色';
 }
 
+function librarySourceLabel(source) {
+    if (source === 'persona') return '用户设定';
+    if (source === 'character-card') return '角色卡';
+    if (source === 'ai-scan') return 'AI';
+    return '世界书';
+}
+
+function renderLibraryScanOptions() {
+    const settings = get();
+    const ai = el('is-library-ai-scan');
+    if (ai) ai.checked = settings.libraryScan?.ai !== false;
+    const scope = el('is-library-scan-scope');
+    if (scope) scope.value = settings.libraryScan?.scope === 'all' ? 'all' : 'active';
+}
+
 function renderLibrary() {
     const context = ctx();
     const character = context?.characters?.[context?.characterId];
     setText('is-library-char', character ? `当前：${character.name || '未命名'}` : '当前没有打开角色卡');
+    renderLibraryScanOptions();
     const entries = getCharacterLibrary();
     const list = el('is-library-list');
     if (!list) return;
@@ -1794,24 +1827,79 @@ function renderLibraryCandidates() {
             <input type="checkbox" data-library-candidate="${escapeHtml(candidate.id)}" ${checked ? 'checked' : ''} />
             <span class="is-library-candidate-body">
                 <strong>${escapeHtml(candidate.name)}</strong>
-                <span class="is-badge">${escapeHtml(candidate.source === 'persona' ? '用户设定' : candidate.source === 'character-card' ? '角色卡' : '世界书')}</span>
+                <span class="is-badge">${escapeHtml(librarySourceLabel(candidate.source))}</span>
                 ${existing ? '<span class="is-badge">已在库</span>' : ''}
                 <span class="is-hint">${escapeHtml(truncate(candidate.appearance, 160))}</span>
+                ${candidate.outfit ? `<span class="is-hint">服装：${escapeHtml(truncate(candidate.outfit, 120))}</span>` : ''}
             </span>
         </label>`;
     }).join('');
 }
 
 async function scanLibrary() {
-    setText('is-library-status', '正在扫描当前角色卡、世界书和用户设定…');
+    if (ui.libraryScanBusy) return;
+    const settings = get();
+    const aiInput = el('is-library-ai-scan');
+    const useAi = aiInput ? aiInput.checked : settings.libraryScan?.ai !== false;
+    const scope = valueOf('is-library-scan-scope') === 'all' ? 'all' : 'active';
+    settings.libraryScan = { ai: useAi, scope };
+    saveSoon();
+    ui.libraryScanBusy = true;
+    const button = el('is-library-scan');
+    if (button) button.disabled = true;
+    setText('is-library-status', scope === 'all'
+        ? '正在读取角色卡、用户设定和整本关联世界书…'
+        : '正在收集角色卡、用户设定和当前对话激活的世界书…');
     try {
-        ui.libraryCandidates = await scanCharacterCandidates();
+        const collected = await collectLibraryScanSources({ scope });
+        let candidates = collected.mechanical || [];
+        let status = '';
+        let extraWorldbookCandidates = 0;
+        if (useAi && collected.sources.length) {
+            setText('is-library-status', `AI 提炼中…（${collected.sources.length} 个来源，约 ${collected.meta.totalChars} 字符）`);
+            try {
+                const messages = buildLibraryScanMessages({
+                    sources: collected.sources,
+                    existingNames: getCharacterLibrary().map(entry => entry.name),
+                });
+                const raw = await requestPluginCompletion(messages, { maxTokens: 1800, temperature: 0.2 });
+                const characters = parseLibraryScanResult(raw);
+                if (!characters.length) throw new Error('模型没有返回可用的角色设定');
+                const aiCandidates = libraryEntriesFromScan(characters, collected.sources);
+                candidates = aiCandidates;
+                if (collected.meta.activationFallback) {
+                    const known = new Set(aiCandidates.map(candidate => candidate.name.toLowerCase()));
+                    const extras = (collected.mechanical || []).filter(candidate =>
+                        candidate.source.startsWith('worldbook:') && !known.has(candidate.name.toLowerCase()));
+                    extraWorldbookCandidates = extras.length;
+                    candidates = aiCandidates.concat(extras);
+                }
+                status = extraWorldbookCandidates
+                    ? `AI 提炼 ${aiCandidates.length} 个角色；世界书未激活，另补入 ${extraWorldbookCandidates} 个机械候选`
+                    : `AI 从 ${collected.sources.length} 个来源提炼出 ${aiCandidates.length} 个角色`;
+            } catch (error) {
+                console.warn('[画坊] AI 角色库扫描失败，使用机械候选', error);
+                candidates = collected.mechanical || [];
+                status = `AI 提炼失败，已退回机械扫描：${truncate(error.message || error, 120)}`;
+            }
+        } else {
+            status = useAi ? '没有可提炼的文本，使用机械扫描' : '使用机械扫描';
+        }
+        ui.libraryCandidates = candidates;
         renderLibraryCandidates();
-        setText('is-library-status', ui.libraryCandidates.length
-            ? `找到 ${ui.libraryCandidates.length} 个候选；勾选后加入角色库。`
-            : '没有找到带外貌信息的候选。可以手动添加。');
+        const notes = [];
+        if (collected.meta.activated) notes.push(`当前对话激活 ${collected.meta.activated} 条世界书`);
+        if (collected.meta.activationFallback && collected.meta.scannedBooks && !extraWorldbookCandidates) notes.push('未检测到激活条目，世界书已回退为机械扫描');
+        if (collected.meta.omittedSources) notes.push(`另有 ${collected.meta.omittedSources} 条来源因数量/长度限制未发送`);
+        const suffix = notes.length ? `（${notes.join('；')}）` : '';
+        setText('is-library-status', candidates.length
+            ? `${status}；找到 ${candidates.length} 个候选，勾选后加入角色库${suffix}`
+            : `${status}；没有找到带外貌信息的候选，可以手动添加${suffix}`);
     } catch (error) {
         setText('is-library-status', `扫描失败：${error.message || error}`);
+    } finally {
+        ui.libraryScanBusy = false;
+        if (button) button.disabled = false;
     }
 }
 
@@ -3060,6 +3148,16 @@ function bindEvents() {
                 break;
             case 'is-profile-balance':
                 syncEditorVisibility();
+                break;
+            case 'is-library-ai-scan':
+                settings.libraryScan = settings.libraryScan || { ai: true, scope: 'active' };
+                settings.libraryScan.ai = target.checked;
+                saveSoon();
+                break;
+            case 'is-library-scan-scope':
+                settings.libraryScan = settings.libraryScan || { ai: true, scope: 'active' };
+                settings.libraryScan.scope = target.value === 'all' ? 'all' : 'active';
+                saveSoon();
                 break;
             case 'is-autosave':
                 settings.ui.autoSave = target.checked;

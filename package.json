@@ -1,6 +1,6 @@
 {
     "name": "sillytavern-image-studio",
-    "version": "0.5.2",
+    "version": "0.6.0",
     "private": true,
     "type": "module",
     "description": "画坊 Image Studio — SillyTavern 1.18 image generation and API manager extension",

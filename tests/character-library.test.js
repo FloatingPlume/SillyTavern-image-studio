@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    collectLibraryScanSources,
     composeFinalPrompt,
     defaultPresentCharacters,
     getCharacterLibrary,
@@ -69,8 +70,65 @@ test('scanCharacterCandidates collects card, persona and appearance-relevant lor
     assert.equal(candidates.some(item => item.name === 'Market'), false);
 });
 
-test('saveCharacterLibrary writes to the current character extension field', async () => {
-    const character = { name: 'Aria', data: { extensions: {} } };
+test('collectLibraryScanSources keeps card/persona global and can read linked worldbooks', async () => {
+    globalThis.SillyTavern = {
+        getContext: () => ({
+            characterId: 0,
+            characters: [{ name: 'Aria', avatar: 'aria.png', data: { extensions: { world: 'Town Lore' } } }],
+            name1: 'Tester',
+            chatMetadata: {},
+            chat: [],
+            powerUserSettings: { persona_description: 'short hair, green jacket' },
+            getCharacterCardFields: () => ({
+                description: 'Aria has black fur and amber eyes.',
+                personality: 'calm',
+                scenario: 'rooftop',
+                firstMessage: 'Aria waits in the rain.',
+            }),
+            loadWorldInfo: async () => ({
+                entries: {
+                    1: { key: ['Borin'], content: 'Borin is a tall wolf with a scar over one eye.', comment: 'Borin' },
+                    2: { key: ['Market'], content: 'The market sells fruit and cloth.', comment: 'Market' },
+                },
+            }),
+        }),
+    };
+    const result = await collectLibraryScanSources({ scope: 'all' });
+    assert.ok(result.sources.some(source => source.kind === 'card' && source.name === 'Aria'));
+    assert.ok(result.sources.some(source => source.kind === 'persona' && source.name === 'Tester'));
+    assert.ok(result.sources.some(source => source.name === 'Borin'));
+    assert.ok(result.sources.some(source => source.name === 'Market' && source.origin === 'all'));
+    assert.ok(result.mechanical.some(candidate => candidate.name === 'Borin'));
+    assert.equal(result.mechanical.some(candidate => candidate.name === 'Market'), false);
+    assert.equal(result.meta.scope, 'all');
+    assert.ok(result.meta.totalChars > 0);
+});
+
+test('collectLibraryScanSources falls back to mechanical worldbooks when activation is unavailable', async () => {
+    globalThis.SillyTavern = {
+        getContext: () => ({
+            characterId: 0,
+            characters: [{ name: 'Aria', avatar: 'aria.png', data: { extensions: { world: 'Town Lore' } } }],
+            name1: 'Tester',
+            chat: [{ name: 'User', is_user: true, mes: 'Hello Aria.' }],
+            chatMetadata: {},
+            maxContext: 4096,
+            powerUserSettings: { persona_description: 'short hair, green jacket' },
+            getCharacterCardFields: () => ({ description: 'Aria has black fur and amber eyes.' }),
+            loadWorldInfo: async () => ({
+                entries: {
+                    1: { key: ['Borin'], content: 'Borin is a tall wolf with a scar over one eye.', comment: 'Borin' },
+                },
+            }),
+        }),
+    };
+    const result = await collectLibraryScanSources({ scope: 'active' });
+    assert.equal(result.meta.activationFallback, true);
+    assert.ok(result.mechanical.some(candidate => candidate.name === 'Borin'));
+    assert.equal(result.sources.some(source => source.kind === 'worldbook'), false);
+});
+
+test('saveCharacterLibrary writes to the current character extension field', async () => {    const character = { name: 'Aria', data: { extensions: {} } };
     const writes = [];
     globalThis.SillyTavern = {
         getContext: () => ({

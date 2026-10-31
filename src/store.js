@@ -59,6 +59,10 @@ function defaultSettings() {
             connectionProfileId: '',
             contextMessages: 4,
         },
+        libraryScan: {
+            ai: true,
+            scope: 'active',
+        },
         prompt: {
             style: 'tags',
             template: DEFAULT_PROMPT_TEMPLATE,
