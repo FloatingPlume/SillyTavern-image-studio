@@ -40,6 +40,7 @@ export const job = {
     timeoutTimer: null,
     cloudAbort: null,
     finishing: false,
+    wsUnavailable: false,
     callbacks: {},
 };
 
@@ -111,6 +112,7 @@ function resetJob(provider, callbacks, details) {
     job.cancelled = false;
     job.details = details;
     job.finishing = false;
+    job.wsUnavailable = false;
     job.cloudAbort = null;
     job.callbacks = callbacks || {};
     pendingMessages.length = 0;
@@ -431,16 +433,35 @@ export async function generateComfy(callbacks, { positive = '', negative = '', m
                 resolve();
             };
             comfy.ensureSocket({
-                onOpen: done,
+                onOpen: () => {
+                    job.wsUnavailable = false;
+                    emit({ wsUnavailable: false });
+                    done();
+                },
                 onMessage: handleSocketMessage,
                 onPreview: setPreview,
-                onError: () => done(),
-                onClose: () => {
-                    if (job.active) emit({ statusText: '进度连接已断开，改用轮询' });
+                onError: () => {
+                    job.wsUnavailable = true;
+                    emit({ wsUnavailable: true });
+                    done();
                 },
-            }).catch(() => done());
+                onClose: () => {
+                    if (job.active) {
+                        job.wsUnavailable = true;
+                        emit({ statusText: '进度连接已断开，改用轮询', wsUnavailable: true });
+                    }
+                },
+            }).catch(() => {
+                job.wsUnavailable = true;
+                done();
+            });
             setTimeout(done, 2000);
         });
+
+        if (!comfy.isSocketOpen()) {
+            job.wsUnavailable = true;
+            emit({ statusText: '实时预览不可用，改用进度轮询', wsUnavailable: true });
+        }
 
         emit({ statusText: '提交工作流…' });
         const submitted = await comfy.submit(workflow);

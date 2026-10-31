@@ -19,7 +19,7 @@ test('manifest points to existing extension entry files', () => {
 
 test('panel template contains the main UI containers', () => {
     const html = panelTemplate();
-    for (const id of ['is-panel', 'is-generate', 'is-custom-workflow', 'is-api-list', 'is-history-list', 'is-lightbox', 'is-plugin-mode', 'is-plugin-context', 'is-rewrite-route', 'is-library-ai-scan', 'is-library-scan-scope', 'is-library-prompt', 'is-library-convert', 'is-library-generate', 'is-reference-bar', 'is-reference-file', 'is-img2img-denoise', 'is-load-ipadapter']) {
+    for (const id of ['is-panel', 'is-generate', 'is-custom-workflow', 'is-api-list', 'is-history-list', 'is-lightbox', 'is-plugin-mode', 'is-plugin-context', 'is-rewrite-route', 'is-library-ai-scan', 'is-library-scan-scope', 'is-library-prompt', 'is-library-convert', 'is-library-generate', 'is-reference-bar', 'is-reference-file', 'is-img2img-denoise', 'is-load-ipadapter', 'is-generation-source', 'is-ws-warning']) {
         assert.match(html, new RegExp(`id="${id}"`));
     }
 });

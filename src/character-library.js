@@ -470,7 +470,7 @@ export function composeFinalPrompt(scene, entries, style = 'tags') {
             const details = entry.prompt || [entry.appearance, entry.outfit ? `服装：${entry.outfit}` : ''].filter(Boolean).join('，');
             return style === 'natural'
                 ? `${entry.name}：${details}`
-                : `${entry.name}，${details}`;
+                : details;
         });
     if (style === 'natural') {
         return truncate([

@@ -78,6 +78,12 @@ function defaultSettings() {
             negative: DEFAULT_NEGATIVE,
             referencePath: '',
             referenceName: '',
+            source: {
+                type: 'manual',
+                label: '手动提示词',
+                detail: '',
+                modified: false,
+            },
         },
         history: [],
         balanceCache: {},

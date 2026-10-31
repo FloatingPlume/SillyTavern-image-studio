@@ -54,7 +54,7 @@ test('composeFinalPrompt prefers converted character prompts over raw sheets', (
 test('composeFinalPrompt appends authoritative appearance and outfit', () => {
     const prompt = composeFinalPrompt('rainy rooftop, night', [entries[0], entries[1]], 'tags');
     assert.match(prompt, /rainy rooftop/);
-    assert.match(prompt, /Aria/);
+    assert.doesNotMatch(prompt, /Aria/);
     assert.match(prompt, /black fur/);
     assert.match(prompt, /red cloak/);
     assert.match(prompt, /short hair/);

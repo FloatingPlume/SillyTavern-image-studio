@@ -20,7 +20,6 @@ import {
     buildQuietRewritePrompt,
     buildRewriteMessages,
     expandPrompt,
-    insertAtCursor,
     parseRewriteResult,
 } from './prompt.js';
 import {
@@ -365,6 +364,7 @@ function refreshForm() {
     setValue('is-negative', settings.draft?.negative ?? settings.prompt.negative ?? '');
     setValue('is-img2img-denoise', settings.comfy.img2imgDenoise ?? 0.55);
     renderReferenceBar();
+    renderGenerationSource();
     setValue('is-count', ui.provider === 'cloud' ? settings.cloud.count : settings.comfy.batch);
     setValue('is-seed', ui.provider === 'cloud' ? settings.cloud.seed : settings.comfy.seed);
     setValue('is-width', ui.provider === 'cloud' ? settings.cloud.width : settings.comfy.width);
@@ -795,6 +795,7 @@ function renderJob() {
     }
     setText('is-node-label', job.nodeProgress || job.node || '');
     setText('is-queue-label', job.queueRemaining != null ? `队列 ${job.queueRemaining}` : '');
+    setHidden('is-ws-warning', !job.wsUnavailable);
     const preview = el('is-preview');
     const empty = el('is-preview-empty');
     if (preview && empty) {
@@ -965,6 +966,48 @@ async function resolveGenerationReference() {
         name,
         path,
     };
+}
+
+function renderGenerationSource() {
+    const bar = el('is-generation-source');
+    const label = el('is-generation-source-label');
+    if (!bar || !label) return;
+    const source = get().draft?.source || { type: 'manual', label: '手动提示词' };
+    const type = source.type || 'manual';
+    let text = source.label || (type === 'manual' ? '手动提示词' : '');
+    if (source.detail) text += ` · ${source.detail}`;
+    if (source.modified) text += ' · 已手动修改';
+    label.textContent = text;
+    bar.classList.toggle('is-library', type === 'library');
+    bar.classList.toggle('is-message', type === 'message');
+    const reset = el('is-generation-source-reset');
+    if (reset) reset.hidden = type === 'manual';
+}
+
+function setGenerationSource(source = {}) {
+    const settings = get();
+    settings.draft.source = {
+        type: source.type || 'manual',
+        label: source.label || '手动提示词',
+        detail: source.detail || '',
+        modified: !!source.modified,
+    };
+    saveSoon();
+    renderGenerationSource();
+}
+
+function resetGenerationSource() {
+    setGenerationSource({ type: 'manual', label: '手动提示词' });
+}
+
+function markGenerationSourceModified() {
+    const settings = get();
+    if (!settings.draft.source) return;
+    if (settings.draft.source.type === 'manual') return;
+    if (settings.draft.source.modified) return;
+    settings.draft.source.modified = true;
+    saveSoon();
+    renderGenerationSource();
 }
 
 function jobCallbacks() {    return {
@@ -1746,6 +1789,7 @@ async function runRewrite() {
         if (parsed.negative) setValue('is-negative', parsed.negative);
         settings.draft.positive = parsed.positive;
         settings.draft.negative = parsed.negative || negative;
+        markGenerationSourceModified();
         saveSoon();
         setText('is-rewrite-status', `已写入提示词 · ${parsed.positive.length} 字符`);
         toast('success', '提示词已改写');
@@ -2128,6 +2172,11 @@ async function startLibraryImageGeneration(positive, negative, entries) {
         toast('warning', '角色库生成的提示词为空');
         return;
     }
+    setGenerationSource({
+        type: 'library',
+        label: '角色库生图',
+        detail: (entries || []).map(entry => entry.name).join('、'),
+    });
     const settings = get();
     settings.draft.positive = positive;
     settings.draft.negative = negative;
@@ -2626,6 +2675,12 @@ async function startMessageImageGeneration(messageId, positive, negative) {
         toast('warning', '场景提示词为空');
         return;
     }
+    const sourceMessage = ctx()?.chat?.[messageId];
+    setGenerationSource({
+        type: 'message',
+        label: `对话生图 · 第 ${Number(messageId) + 1} 条`,
+        detail: truncate(stripHtml(sourceMessage?.mes || ''), 48),
+    });
     ui.messageGenBusy = true;
     const settings = get();
     const chatId = messageChatId();
@@ -2757,6 +2812,7 @@ function bindChatMessageEvents() {
                 ui.librarySelected.clear();
                 ui.librarySelectionInitialized = false;
                 clearGenerationReference();
+                resetGenerationSource();
                 renderLibraryCandidates();
                 if (ui.tab === 'library') renderLibrary();
                 setTimeout(schedule, 250);
@@ -2870,10 +2926,11 @@ function bindEvents() {
             const text = buildCharacterPrompt();
             const positive = el('is-positive');
             if (positive) {
-                if (!positive.value.trim()) positive.value = text;
-                else insertAtCursor(positive, text);
+                positive.value = text;
                 get().draft.positive = positive.value;
+                setGenerationSource({ type: 'manual', label: '手动提示词', detail: '角色外观' });
                 saveSoon();
+                toast('success', '已用角色外观替换提示词');
             }
             return;
         }
@@ -2987,6 +3044,10 @@ function bindEvents() {
         }
         if (target.closest('#is-reference-clear')) {
             clearGenerationReference();
+            return;
+        }
+        if (target.closest('#is-generation-source-reset')) {
+            resetGenerationSource();
             return;
         }
         if (target.closest('#is-cancel')) {
@@ -3237,6 +3298,7 @@ function bindEvents() {
         switch (target.id) {
             case 'is-positive':
                 settings.draft.positive = target.value;
+                markGenerationSourceModified();
                 saveSoon();
                 break;
             case 'is-negative':

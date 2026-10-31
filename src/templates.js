@@ -45,6 +45,12 @@ export function panelTemplate() {
         <div id="is-cloud-hint" class="is-hint"></div>
       </div>
 
+      <div id="is-generation-source" class="is-brief is-generation-source">
+        <i class="fa-solid fa-tag"></i>
+        <span id="is-generation-source-label" class="is-grow">手动提示词</span>
+        <button type="button" class="is-link" id="is-generation-source-reset" hidden>切回手动</button>
+      </div>
+
       <div class="is-field">
         <div class="is-field-head">
           <label for="is-positive">正面提示词</label>
@@ -235,6 +241,7 @@ export function panelTemplate() {
           <span id="is-node-label"></span>
           <span id="is-queue-label"></span>
         </div>
+        <div id="is-ws-warning" class="is-hint is-ws-warning" hidden>实时预览不可用：新版 ComfyUI 会拒绝手机端的跨站 WebSocket。请在绘世/ComfyUI 启动参数加入 <code>--enable-cors-header "*"</code> 后重启；不影响出图。</div>
         <div class="is-preview-wrap">
           <img id="is-preview" alt="实时预览" hidden />
           <div id="is-preview-empty" class="is-hint">等待 ComfyUI 预览帧…</div>
@@ -323,6 +330,7 @@ export function panelTemplate() {
           <li>Windows 防火墙需要允许 ComfyUI 的端口（默认 8188），且网络类型为“专用”。</li>
           <li>画坊默认走酒馆服务端代理，可避开浏览器跨域；如果 App 里没开“让服务端充当跨域代理”，HTTP 会失败，WebSocket 仍可能可用。</li>
           <li>如果 App 开启了私网地址白名单，请把电脑 IP 或 192.168.0.0/16 加进允许列表。</li>
+          <li>能出图但没有实时预览：新版 ComfyUI 会拒绝手机跨站 WebSocket。给绘世/ComfyUI 启动参数加 <code>--enable-cors-header "*"</code> 后重启。</li>
         </ol>
       </div>
     </section>

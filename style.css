@@ -279,6 +279,23 @@
     color: var(--is-fg);
 }
 
+.is-generation-source {
+    color: var(--is-muted);
+    border-style: dashed;
+}
+
+.is-generation-source > i {
+    color: var(--is-accent);
+}
+
+.is-generation-source.is-library {
+    border-color: color-mix(in srgb, var(--is-accent) 45%, var(--is-border));
+}
+
+.is-generation-source.is-message {
+    border-color: color-mix(in srgb, #c9a66b 45%, var(--is-border));
+}
+
 .is-reference-bar img {
     width: 42px;
     height: 42px;
@@ -568,6 +585,11 @@ details > summary {
     color: var(--is-muted);
     font-size: 10.5px;
     min-height: 14px;
+}
+
+.is-ws-warning {
+    color: #d8b26a;
+    line-height: 1.5;
 }
 
 .is-progress {
