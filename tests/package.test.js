@@ -33,6 +33,18 @@ test('bundled IPAdapter workflow is valid API-format JSON with a reference place
     assert.ok(Object.values(workflow).some(node => node.class_type === 'SaveImage'));
 });
 
+test('UI stays split into feature modules instead of one monolith', () => {
+    const modules = [
+        'core.js', 'events.js', 'api.js', 'monitor.js', 'generation.js',
+        'history.js', 'library.js', 'messages.js', 'scene.js',
+    ];
+    for (const file of modules) {
+        assert.ok(fs.existsSync(path.join(root, 'src', 'ui', file)), `missing src/ui/${file}`);
+    }
+    const entry = fs.readFileSync(path.join(root, 'src', 'ui.js'), 'utf8');
+    assert.ok(entry.split('\n').length < 1000, 'src/ui.js should stay a thin entry/form module');
+});
+
 test('panel input sizing does not stretch checkboxes to full width', () => {
     const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
     assert.match(css, /#is-panel input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\)/);

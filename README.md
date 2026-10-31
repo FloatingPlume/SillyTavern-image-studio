@@ -310,7 +310,17 @@ manifest.json
 index.js
 style.css
 src/
-  ui.js         面板与交互
+  ui.js         面板入口、表单、页签与初始化
+  ui/
+    core.js       共享状态、DOM 帮助函数与跨模块 bridge
+    events.js     点击/输入/切换事件绑定
+    api.js        API 档案、模型、余额、连接与插件模型
+    monitor.js    ComfyUI 连接、PC 状态、队列与局域网扫描
+    generation.js 生图入口、参考图/来源栏、任务进度与结果
+    history.js    生成记录、灯箱与图库操作
+    library.js    角色库列表、AI 扫描与提示词转换
+    messages.js   消息生图按钮、缩略图恢复
+    scene.js      场景确认弹窗
   jobs.js       ComfyUI / 云端任务调度
   comfy.js      ComfyUI HTTP + WebSocket
   character-library.js  角色卡/世界书扫描、角色库存储与提示词组合
